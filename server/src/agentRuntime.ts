@@ -14,11 +14,13 @@ import * as path from 'path';
 
 import type { HookProvider } from '../../core/src/provider.js';
 import type { AgentStateStore } from './agentStateStore.js';
+import { PENDING_SPAWN_TIMEOUT_MS } from './constants.js';
 import { DismissalTracker } from './dismissalTracker.js';
 import {
   adoptExternalSessionFromHook,
   ensureProjectScan,
   isTrackedProjectDir,
+  readNewLines,
   reassignAgentToFile,
   scanForTeammateFiles,
   setAgentRemovalCallback,
@@ -32,6 +34,8 @@ import {
 } from './fileWatcher.js';
 import type { HookEvent } from './hookEventHandler.js';
 import { HookEventHandler } from './hookEventHandler.js';
+import type { PendingSpawn } from './pendingSpawnRegistry.js';
+import { PendingSpawnRegistry } from './pendingSpawnRegistry.js';
 import { SessionRouter } from './sessionRouter.js';
 import { cancelPermissionTimer, cancelWaitingTimer } from './timerManager.js';
 import { setHookProvider } from './transcriptParser.js';
@@ -66,6 +70,7 @@ export class AgentRuntime {
 
   // Dependencies
   readonly dismissalTracker = new DismissalTracker();
+  readonly pendingSpawns = new PendingSpawnRegistry();
   private hookEventHandler: HookEventHandler;
   private lifecycleCallbacks: RuntimeLifecycleCallbacks = {};
 
@@ -175,7 +180,86 @@ export class AgentRuntime {
           this.removeAgent(agentId);
         }
       },
+      onPromptSubmit: (sessionId, prompt) => {
+        const spawn = this.pendingSpawns.findByPromptPrefix(prompt);
+        if (!spawn) return false;
+        return this.bindPendingSpawn(spawn, sessionId);
+      },
+      onSessionStartCandidate: (sessionId, transcriptPath, cwd) => {
+        const dir = transcriptPath ? path.dirname(transcriptPath) : cwd;
+        if (!dir) return;
+        const spawn = this.pendingSpawns.findSoleByProjectDir(dir);
+        if (!spawn || spawn.candidateSessionId) return;
+        spawn.candidateSessionId = sessionId;
+        spawn.candidateTranscriptPath = transcriptPath;
+      },
     });
+  }
+
+  // ── Pending tab-mode spawns (prompt-named launch correlation) ──
+
+  /** Register a tab-mode placeholder awaiting its real session id. Arms a
+   *  timeout: if a SessionStart candidate was recorded in the meantime, bind
+   *  to it (fallback matcher wins at timeout); otherwise despawn the
+   *  placeholder (covers "user closed the tab without typing"). */
+  addPendingSpawn(agentId: number, name: string, projectDir: string, cwd: string): void {
+    const timer = setTimeout(() => {
+      const spawn = this.pendingSpawns.removeByAgentId(agentId);
+      if (!spawn) return;
+      if (spawn.candidateSessionId) {
+        this.bindPendingSpawn(spawn, spawn.candidateSessionId, spawn.candidateTranscriptPath);
+      } else {
+        this.removeAgent(agentId);
+      }
+    }, PENDING_SPAWN_TIMEOUT_MS);
+    this.pendingSpawns.add({ agentId, name, projectDir, cwd, createdAt: Date.now(), timer });
+  }
+
+  /**
+   * Bind a pending spawn's placeholder agent to its real session. Dedupes
+   * against a Watch-All global-scanner race (same session id or resolved
+   * jsonl already tracked by another agent), starts file watching from the
+   * beginning of the file (it's seconds old -- replay is correct), and clears
+   * the placeholder's synthetic "Opening Claude tab..." overlay.
+   */
+  bindPendingSpawn(spawn: PendingSpawn, sessionId: string, transcriptPath?: string): boolean {
+    this.pendingSpawns.removeByAgentId(spawn.agentId);
+    const agent = this.store.get(spawn.agentId);
+    if (!agent) return false;
+
+    const jsonlFile = transcriptPath || path.join(spawn.projectDir, `${sessionId}.jsonl`);
+    const resolvedJsonl = path.resolve(jsonlFile).toLowerCase();
+    for (const [otherId, otherAgent] of this.store) {
+      if (otherId === spawn.agentId) continue;
+      if (
+        (otherAgent.sessionId && otherAgent.sessionId === sessionId) ||
+        (otherAgent.jsonlFile && path.resolve(otherAgent.jsonlFile).toLowerCase() === resolvedJsonl)
+      ) {
+        this.removeAgent(otherId);
+      }
+    }
+
+    agent.sessionId = sessionId;
+    agent.jsonlFile = jsonlFile;
+    agent.hookDelivered = true;
+    agent.fileOffset = 0;
+    this.knownJsonlFiles.add(jsonlFile);
+
+    this.registerAgent(sessionId, spawn.agentId);
+    startFileWatching(
+      spawn.agentId,
+      jsonlFile,
+      this.store,
+      this.fileWatchers,
+      this.pollingTimers,
+      this.waitingTimers,
+      this.permissionTimers,
+    );
+    readNewLines(spawn.agentId, this.store, this.waitingTimers, this.permissionTimers);
+
+    this.store.broadcast({ type: 'agentToolsClear', id: spawn.agentId });
+    this.store.persist();
+    return true;
   }
 
   /** Register adapter-specific lifecycle callbacks. */
@@ -417,6 +501,7 @@ export class AgentRuntime {
   /** Clean up all scanners, timers, and agents. Called on shutdown. */
   dispose(): void {
     this.hookEventHandler.dispose();
+    this.pendingSpawns.dispose();
 
     if (this.projectScanTimer.current) {
       clearInterval(this.projectScanTimer.current);

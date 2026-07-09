@@ -582,6 +582,120 @@ describe('HookEventHandler', () => {
     expect(agent?.isWaiting).toBe(true);
   });
 
+  // ── UserPromptSubmit / pending-spawn correlation ─────────────
+
+  it('promptSubmit for a known session broadcasts active', () => {
+    const agent = createTestAgent({
+      id: 1,
+      isWaiting: true,
+      hookDelivered: false,
+    } as Partial<AgentState>);
+    agents.set(1, agent);
+    handler.registerAgent('sess-1', 1);
+
+    handler.handleEvent('claude', {
+      hook_event_name: 'UserPromptSubmit',
+      session_id: 'sess-1',
+      prompt: 'do the thing',
+    });
+
+    expect(agent.hookDelivered).toBe(true);
+    expect(agent.isWaiting).toBe(false);
+    const msg = mockWebview.messages.find((m) => m.type === 'agentStatus' && m.status === 'active');
+    expect(msg).toBeTruthy();
+    expect(msg?.id).toBe(1);
+  });
+
+  it('promptSubmit matching a pending spawn binds without creating a duplicate external agent', () => {
+    // Placeholder agent (tab-mode spawn): no sessionId yet, not registered.
+    const placeholder = createTestAgent({ id: 1, sessionId: '' } as Partial<AgentState>);
+    agents.set(1, placeholder);
+
+    const onPromptSubmit = vi.fn((sessionId: string) => {
+      // Simulate AgentRuntime.bindPendingSpawn: bind the placeholder to the real session.
+      placeholder.sessionId = sessionId;
+      handler.registerAgent(sessionId, 1);
+      return true;
+    });
+    const onExternalSessionDetected = vi.fn();
+    handler.setLifecycleCallbacks({ onPromptSubmit, onExternalSessionDetected });
+
+    // SessionStart for the same session arrives first (typical ordering) and
+    // is stored as pending.
+    handler.handleEvent('claude', {
+      hook_event_name: 'SessionStart',
+      session_id: 'tab-sess',
+      source: 'startup',
+      transcript_path: '/projects/test/tab-sess.jsonl',
+      cwd: '/projects/test',
+    });
+
+    // UserPromptSubmit binds the pending spawn -- must discard the pending
+    // record so a later confirmation event can't ALSO adopt it as external.
+    handler.handleEvent('claude', {
+      hook_event_name: 'UserPromptSubmit',
+      session_id: 'tab-sess',
+      prompt: '(Paul) reporting for duty.',
+    });
+
+    expect(onPromptSubmit).toHaveBeenCalledWith(
+      'tab-sess',
+      '(Paul) reporting for duty.',
+      undefined,
+      undefined,
+    );
+    expect(placeholder.sessionId).toBe('tab-sess');
+
+    // A later confirmation-style event must NOT re-confirm the discarded
+    // pending record and spawn a duplicate external agent.
+    handler.handleEvent('claude', {
+      hook_event_name: 'Stop',
+      session_id: 'tab-sess',
+    });
+    expect(onExternalSessionDetected).not.toHaveBeenCalled();
+    expect(agents.size).toBe(1);
+  });
+
+  it('promptSubmit for an unknown session with no pending spawn still confirms a pending external', () => {
+    const onExternalSessionDetected = vi.fn();
+    handler.setLifecycleCallbacks({ onExternalSessionDetected }); // no onPromptSubmit registered
+
+    handler.handleEvent('claude', {
+      hook_event_name: 'SessionStart',
+      session_id: 'ext-sess-2',
+      source: 'startup',
+      transcript_path: '/projects/test/ext-sess-2.jsonl',
+      cwd: '/projects/test',
+    });
+
+    expect(onExternalSessionDetected).not.toHaveBeenCalled();
+
+    onExternalSessionDetected.mockImplementation((sessionId: string) => {
+      const agent = createTestAgent({
+        id: 3,
+        sessionId,
+        projectDir: '/projects/test',
+      } as Partial<AgentState>);
+      agents.set(3, agent);
+      handler.registerAgent(sessionId, 3);
+    });
+
+    handler.handleEvent('claude', {
+      hook_event_name: 'UserPromptSubmit',
+      session_id: 'ext-sess-2',
+      prompt: 'hello world',
+    });
+
+    expect(onExternalSessionDetected).toHaveBeenCalledWith(
+      'ext-sess-2',
+      '/projects/test/ext-sess-2.jsonl',
+      '/projects/test',
+    );
+    // Re-processed after adoption -- known branch sets hookDelivered.
+    const agent = agents.get(3);
+    expect(agent?.hookDelivered).toBe(true);
+  });
+
   // ── Resume ──────────────────────────────────────────────────
 
   it('SessionStart(source=resume) calls onSessionResume', () => {

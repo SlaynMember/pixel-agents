@@ -13,6 +13,12 @@ import {
   CHARACTER_Z_SORT_OFFSET,
   DELETE_BUTTON_BG,
   FALLBACK_FLOOR_COLOR,
+  FOCUS_PULSE_DURATION_SEC,
+  FOCUS_PULSE_MAX_ALPHA,
+  FOCUS_PULSE_RADIUS_MIN_PX,
+  FOCUS_PULSE_RADIUS_RANGE_PX,
+  FOCUS_PULSE_RING_COLOR,
+  FOCUS_PULSE_Y_ASPECT,
   GHOST_BORDER_HOVER_FILL,
   GHOST_BORDER_HOVER_STROKE,
   GHOST_BORDER_STROKE,
@@ -207,6 +213,29 @@ export function renderScene(
         c.drawImage(cached, drawX, drawY);
       },
     });
+
+    // Click-to-focus ack: expanding, fading ellipse ring at the character's feet.
+    if (ch.focusPulseTimer !== undefined && ch.focusPulseTimer > 0) {
+      const t = 1 - ch.focusPulseTimer / FOCUS_PULSE_DURATION_SEC;
+      const radiusX = (FOCUS_PULSE_RADIUS_MIN_PX + FOCUS_PULSE_RADIUS_RANGE_PX * t) * zoom;
+      const radiusY = radiusX * FOCUS_PULSE_Y_ASPECT;
+      const pulseAlpha = FOCUS_PULSE_MAX_ALPHA * (1 - t);
+      const feetX = offsetX + ch.x * zoom;
+      const feetY = offsetY + (ch.y + sittingOffset) * zoom;
+      drawables.push({
+        zY: charZY + OUTLINE_Z_SORT_OFFSET, // sort just in front of the character
+        draw: (c) => {
+          c.save();
+          c.globalAlpha = pulseAlpha;
+          c.strokeStyle = FOCUS_PULSE_RING_COLOR;
+          c.lineWidth = 2;
+          c.beginPath();
+          c.ellipse(feetX, feetY, radiusX, radiusY, 0, 0, Math.PI * 2);
+          c.stroke();
+          c.restore();
+        },
+      });
+    }
   }
 
   // ── Pets ──────────────────────────────────────────────

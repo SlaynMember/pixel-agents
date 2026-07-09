@@ -106,12 +106,34 @@ describe('claudeProvider', () => {
       }
     });
 
-    it('ignores UserPromptSubmit (no normalized kind yet)', () => {
+    it('normalizes UserPromptSubmit with prompt + transcript_path + cwd', () => {
+      const result = claudeProvider.normalizeHookEvent({
+        hook_event_name: 'UserPromptSubmit',
+        session_id: 'sess-1',
+        prompt: '(Paul) reporting for duty.',
+        transcript_path: '/Users/x/.claude/projects/foo/sess-1.jsonl',
+        cwd: '/Users/x/work',
+      });
+      expect(result?.sessionId).toBe('sess-1');
+      expect(result?.event.kind).toBe('promptSubmit');
+      if (result?.event.kind === 'promptSubmit') {
+        expect(result.event.prompt).toBe('(Paul) reporting for duty.');
+        expect(result.event.transcriptPath).toBe('/Users/x/.claude/projects/foo/sess-1.jsonl');
+        expect(result.event.cwd).toBe('/Users/x/work');
+      }
+    });
+
+    it('normalizes UserPromptSubmit with missing optional fields to undefined', () => {
       const result = claudeProvider.normalizeHookEvent({
         hook_event_name: 'UserPromptSubmit',
         session_id: 'sess-1',
       });
-      expect(result).toBeNull();
+      expect(result?.event.kind).toBe('promptSubmit');
+      if (result?.event.kind === 'promptSubmit') {
+        expect(result.event.prompt).toBeUndefined();
+        expect(result.event.transcriptPath).toBeUndefined();
+        expect(result.event.cwd).toBeUndefined();
+      }
     });
 
     it('normalizes SubagentStart with agent_type as toolName', () => {

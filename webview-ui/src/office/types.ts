@@ -190,6 +190,8 @@ export interface Character {
   folderName?: string;
   /** Assigned display name (e.g. "Paul") */
   name?: string;
+  /** Click-to-focus ack ring: counts down from FOCUS_PULSE_DURATION_SEC to 0. */
+  focusPulseTimer?: number;
 
   // -- Agent Teams --
   /** Team name this agent belongs to */

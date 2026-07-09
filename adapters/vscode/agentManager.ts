@@ -324,6 +324,17 @@ export function restoreAgents(
       } catch {
         continue;
       }
+    } else if (p.isTab) {
+      // Tab agents have no terminal to rebind. Only restore when the session
+      // actually bound (jsonlFile set and still on disk) — unbound placeholders
+      // (jsonlFile "") die naturally on reload instead of resurrecting as
+      // zombie unbound tabs.
+      if (!p.jsonlFile) continue;
+      try {
+        if (!fs.existsSync(p.jsonlFile)) continue;
+      } catch {
+        continue;
+      }
     } else {
       // Terminal agents — find matching terminal by name
       terminal = liveTerminals.find((t) => t.name === p.terminalName);
@@ -370,6 +381,12 @@ export function restoreAgents(
       console.log(
         `[Pixel Agents] Terminal: Agent ${p.id} - restored external → ${path.basename(p.jsonlFile)}`,
       );
+    } else if (p.isTab) {
+      console.log(
+        `[Pixel Agents] Terminal: Agent ${p.id} - restored tab → ${path.basename(p.jsonlFile)}`,
+      );
+      // Not added to justRestoredTerminalIds — the 10s no-data cull below is
+      // terminal-specific (dead terminals restored after a window reload).
     } else {
       console.log(
         `[Pixel Agents] Terminal: Agent ${p.id} - restored → terminal "${p.terminalName}"`,

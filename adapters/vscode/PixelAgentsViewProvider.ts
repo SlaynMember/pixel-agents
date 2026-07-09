@@ -54,9 +54,11 @@ import {
 } from './agentManager.js';
 import { assignAgentName } from './agentNames.js';
 import {
+  CLAUDE_CODE_EDITOR_OPEN_COMMAND,
   CONFIG_KEY_AUTO_SHOW_PANEL,
   CONFIG_KEY_AUTO_SPAWN_AGENT,
   CONFIG_KEY_HOOK_EVENT_MODE,
+  CONFIG_KEY_LAUNCH_MODE,
   GLOBAL_KEY_ALWAYS_SHOW_LABELS,
   GLOBAL_KEY_HOOKS_ENABLED,
   GLOBAL_KEY_HOOKS_INFO_SHOWN,
@@ -65,6 +67,7 @@ import {
   GLOBAL_KEY_WATCH_ALL_SESSIONS,
   LAYOUT_REVISION_KEY,
 } from './constants.js';
+import { launchNewTab } from './tabLauncher.js';
 import { VscodeTerminalAdapter } from './vscodeTerminalAdapter.js';
 
 /** Cap on the pending-broadcast queue. If we exceed this, something has gone
@@ -249,26 +252,38 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
 
     webviewView.webview.onDidReceiveMessage(async (message) => {
       if (message.type === 'launchAgent') {
+        const folderPath = message.folderPath as string | undefined;
+        const bypassPermissions = message.bypassPermissions as boolean | undefined;
+        // Bypass-permissions is terminal-only (tab mode has no CLI flag to pass it).
+        const useTab =
+          vscode.workspace
+            .getConfiguration()
+            .get<'tab' | 'terminal'>(CONFIG_KEY_LAUNCH_MODE, 'tab') === 'tab' && !bypassPermissions;
         const prevAgentIds = new Set(this.store.keys());
-        await launchNewTerminal(
-          this.store.nextAgentId,
-          this.store.nextTerminalIndex,
-          this.store,
-          this.runtime.activeAgentId,
-          this.runtime.knownJsonlFiles,
-          this.runtime.fileWatchers,
-          this.runtime.pollingTimers,
-          this.runtime.waitingTimers,
-          this.runtime.permissionTimers,
-          this.runtime.jsonlPollTimers,
-          this.runtime.projectScanTimer,
-          () => this.store.persist(),
-          message.folderPath as string | undefined,
-          message.bypassPermissions as boolean | undefined,
-        );
-        // Register newly created agent(s) with hook handler
+        if (useTab) {
+          await launchNewTab(this.store, this.runtime, folderPath);
+        } else {
+          await launchNewTerminal(
+            this.store.nextAgentId,
+            this.store.nextTerminalIndex,
+            this.store,
+            this.runtime.activeAgentId,
+            this.runtime.knownJsonlFiles,
+            this.runtime.fileWatchers,
+            this.runtime.pollingTimers,
+            this.runtime.waitingTimers,
+            this.runtime.permissionTimers,
+            this.runtime.jsonlPollTimers,
+            this.runtime.projectScanTimer,
+            () => this.store.persist(),
+            folderPath,
+            bypassPermissions,
+          );
+        }
+        // Register newly created agent(s) with hook handler. Skip unbound tab
+        // placeholders — sessionId is "" until UserPromptSubmit/SessionStart binds it.
         for (const [id, agent] of this.store) {
-          if (!prevAgentIds.has(id)) {
+          if (!prevAgentIds.has(id) && agent.sessionId) {
             this.runtime.registerAgent(agent.sessionId, id);
           }
         }
@@ -282,6 +297,18 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
             const lead = this.store.get(agent.leadAgentId);
             if (lead?.terminalRef) {
               lead.terminalRef.show();
+            }
+          } else if (agent.sessionId && (agent.isTab || agent.isExternal)) {
+            // Tab or external agent: open (or resume) its session as an editor
+            // tab. An already-open session focuses the existing panel; a closed
+            // one resumes in a new tab — both are the desired behavior.
+            try {
+              await vscode.commands.executeCommand(
+                CLAUDE_CODE_EDITOR_OPEN_COMMAND,
+                agent.sessionId,
+              );
+            } catch (e) {
+              console.error(`[Pixel Agents] focusAgent: editor.open failed: ${e}`);
             }
           }
         }
@@ -388,9 +415,12 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
           this.runtime.projectScanTimer,
           this.runtime.activeAgentId,
         );
-        // Register all restored agents with hook handler
+        // Register all restored agents with hook handler. Skip unbound tab
+        // placeholders — sessionId is "" until UserPromptSubmit/SessionStart binds it.
         for (const agent of this.store.values()) {
-          this.runtime.registerAgent(agent.sessionId, agent.id);
+          if (agent.sessionId) {
+            this.runtime.registerAgent(agent.sessionId, agent.id);
+          }
         }
 
         // Auto-spawn: launch one agent on first webviewReady if the setting is
@@ -427,7 +457,7 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
             autoShowPanel,
           );
           for (const [id, agent] of this.store) {
-            if (!prevAgentIds.has(id)) {
+            if (!prevAgentIds.has(id) && agent.sessionId) {
               this.runtime.registerAgent(agent.sessionId, id);
             }
           }
@@ -453,6 +483,9 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
         this.runtime.watchAllSessions.current = watchAllSessions;
         const hooksEnabled = this.adapter.getSetting<boolean>(GLOBAL_KEY_HOOKS_ENABLED, true);
         const hooksInfoShown = this.adapter.getSetting<boolean>(GLOBAL_KEY_HOOKS_INFO_SHOWN, false);
+        const launchMode = vscode.workspace
+          .getConfiguration()
+          .get<'tab' | 'terminal'>(CONFIG_KEY_LAUNCH_MODE, 'tab');
         const config = readConfig();
         this.webview?.postMessage({
           type: 'settingsLoaded',
@@ -463,6 +496,7 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
           alwaysShowLabels,
           hooksEnabled,
           hooksInfoShown,
+          launchMode,
           externalAssetDirectories: config.externalAssetDirectories,
         });
 

@@ -47,6 +47,12 @@ export {
 } from '../../core/src/constants.js';
 
 export const HOOK_EVENT_BUFFER_MS = 5_000;
+// ── Tab Launch (prompt-named spawn correlation) ─────────────
+/** How long a tab-mode placeholder waits for its session id to bind (via
+ *  UserPromptSubmit prompt-prefix match, or the SessionStart candidate
+ *  fallback) before despawning. Generous because the first prompt may only
+ *  pre-fill the editor tab rather than auto-submit. */
+export const PENDING_SPAWN_TIMEOUT_MS = 120_000;
 /** Grace period after SessionEnd(reason=clear/resume) before triggering onSessionEnd.
  *  /clear and /resume fire SessionEnd then SessionStart within ms. This timeout is a
  *  safety net: if SessionStart never arrives (e.g. the CLI crashes mid-transition),

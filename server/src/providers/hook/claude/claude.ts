@@ -154,8 +154,15 @@ function normalizeHookEvent(
       return { sessionId, event: { kind: 'turnEnd' } };
 
     case 'UserPromptSubmit':
-      // No normalized kind for user prompts yet; silently ignore.
-      return null;
+      return {
+        sessionId,
+        event: {
+          kind: 'promptSubmit',
+          prompt: typeof raw.prompt === 'string' ? raw.prompt : undefined,
+          transcriptPath: typeof raw.transcript_path === 'string' ? raw.transcript_path : undefined,
+          cwd: typeof raw.cwd === 'string' ? raw.cwd : undefined,
+        },
+      };
 
     case 'SubagentStart': {
       const agentType = typeof raw.agent_type === 'string' ? raw.agent_type : 'unknown';

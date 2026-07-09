@@ -13,6 +13,7 @@ interface BottomToolbarProps {
   isSettingsOpen: boolean;
   onToggleSettings: () => void;
   workspaceFolders: WorkspaceFolder[];
+  launchMode: 'tab' | 'terminal';
 }
 
 export function BottomToolbar({
@@ -22,6 +23,7 @@ export function BottomToolbar({
   isSettingsOpen,
   onToggleSettings,
   workspaceFolders,
+  launchMode,
 }: BottomToolbarProps) {
   const [isFolderPickerOpen, setIsFolderPickerOpen] = useState(false);
   const [isBypassMenuOpen, setIsBypassMenuOpen] = useState(false);
@@ -53,7 +55,8 @@ export function BottomToolbar({
   };
 
   const handleAgentHover = () => {
-    if (!isFolderPickerOpen) {
+    // Bypass-permissions is terminal-only -- no dropdown to show in tab mode.
+    if (launchMode !== 'tab' && !isFolderPickerOpen) {
       setIsBypassMenuOpen(true);
     }
   };
@@ -102,11 +105,13 @@ export function BottomToolbar({
           >
             + Agent
           </Button>
-          <Dropdown isOpen={isBypassMenuOpen}>
-            <DropdownItem onClick={() => handleBypassSelect(true)}>
-              Skip permissions mode <span className="text-2xs text-warning">⚠</span>
-            </DropdownItem>
-          </Dropdown>
+          {launchMode !== 'tab' && (
+            <Dropdown isOpen={isBypassMenuOpen}>
+              <DropdownItem onClick={() => handleBypassSelect(true)}>
+                Skip permissions mode <span className="text-2xs text-warning">⚠</span>
+              </DropdownItem>
+            </Dropdown>
+          )}
           <Dropdown isOpen={isFolderPickerOpen} className="min-w-128">
             {workspaceFolders.map((folder) => (
               <DropdownItem

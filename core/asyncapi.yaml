@@ -260,6 +260,11 @@ components:
       type: string
       enum: [active, waiting]
 
+    LaunchMode:
+      description: How new agents are launched — editor tab vs. VS Code terminal.
+      type: string
+      enum: [tab, terminal]
+
     AgentToolStart:
       description: Agent began executing a tool.
       type: object
@@ -601,6 +606,7 @@ components:
         - alwaysShowLabels
         - hooksEnabled
         - hooksInfoShown
+        - launchMode
         - externalAssetDirectories
       properties:
         type:
@@ -619,6 +625,8 @@ components:
           type: boolean
         hooksInfoShown:
           type: boolean
+        launchMode:
+          $ref: '#/components/schemas/LaunchMode'
         externalAssetDirectories:
           type: array
           items:

@@ -258,8 +258,11 @@ export interface SettingsLoaded {
   alwaysShowLabels: boolean;
   hooksEnabled: boolean;
   hooksInfoShown: boolean;
+  launchMode: LaunchMode;
   externalAssetDirectories: string[];
 }
+
+export type LaunchMode = 'tab' | 'terminal';
 
 export interface ExternalAssetDirectoriesUpdated {
   type: 'externalAssetDirectoriesUpdated';

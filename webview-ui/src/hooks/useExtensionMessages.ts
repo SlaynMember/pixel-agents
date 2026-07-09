@@ -72,6 +72,7 @@ interface ExtensionMessageState {
   hooksEnabled: boolean;
   setHooksEnabled: (v: boolean) => void;
   hooksInfoShown: boolean;
+  launchMode: 'tab' | 'terminal';
 }
 
 function saveAgentSeats(os: OfficeState): void {
@@ -109,6 +110,7 @@ export function useExtensionMessages(
   const [alwaysShowLabels, setAlwaysShowLabels] = useState(false);
   const [hooksEnabled, setHooksEnabled] = useState(true);
   const [hooksInfoShown, setHooksInfoShown] = useState(true);
+  const [launchMode, setLaunchMode] = useState<'tab' | 'terminal'>('tab');
 
   // Track whether initial layout has been loaded (ref to avoid re-render)
   const layoutReadyRef = useRef(false);
@@ -532,6 +534,9 @@ export function useExtensionMessages(
         if (typeof msg.hooksInfoShown === 'boolean') {
           setHooksInfoShown(msg.hooksInfoShown as boolean);
         }
+        if (msg.launchMode === 'tab' || msg.launchMode === 'terminal') {
+          setLaunchMode(msg.launchMode);
+        }
         if (Array.isArray(msg.externalAssetDirectories)) {
           setExternalAssetDirectories(msg.externalAssetDirectories as string[]);
         }
@@ -597,5 +602,6 @@ export function useExtensionMessages(
     hooksEnabled,
     setHooksEnabled,
     hooksInfoShown,
+    launchMode,
   };
 }

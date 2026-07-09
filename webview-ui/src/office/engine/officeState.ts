@@ -5,6 +5,7 @@ import {
   CHARACTER_HIT_HEIGHT,
   CHARACTER_SITTING_OFFSET_PX,
   DISMISS_BUBBLE_FAST_FADE_SEC,
+  FOCUS_PULSE_DURATION_SEC,
   FURNITURE_ANIM_INTERVAL_SEC,
   HUE_SHIFT_MIN_DEG,
   HUE_SHIFT_RANGE_DEG,
@@ -742,6 +743,14 @@ export class OfficeState {
     }
   }
 
+  /** Start the click-to-focus ack ring (expanding, fading ellipse at the feet). */
+  triggerFocusPulse(id: number): void {
+    const ch = this.characters.get(id);
+    if (ch) {
+      ch.focusPulseTimer = FOCUS_PULSE_DURATION_SEC;
+    }
+  }
+
   // ── Pets ──────────────────────────────────────────────────────
 
   /**
@@ -903,6 +912,11 @@ export class OfficeState {
 
     const toDelete: number[] = [];
     for (const ch of this.characters.values()) {
+      // Tick the click-to-focus ack ring, independent of matrix-effect/FSM state
+      if (ch.focusPulseTimer !== undefined && ch.focusPulseTimer > 0) {
+        ch.focusPulseTimer = Math.max(0, ch.focusPulseTimer - dt);
+      }
+
       // Handle matrix effect animation
       if (ch.matrixEffect) {
         ch.matrixEffectTimer += dt;

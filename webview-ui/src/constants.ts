@@ -74,6 +74,14 @@ export const CANVAS_FALLBACK_TILE_COLOR = '#444';
 export const CANVAS_ERROR_TILE_COLOR = '#FF00FF';
 export const WALL_COLOR = '#3A3A5C';
 
+// ── Focus Pulse (click-to-focus ack ring) ────────────────────
+export const FOCUS_PULSE_DURATION_SEC = 0.5;
+export const FOCUS_PULSE_RADIUS_MIN_PX = 10;
+export const FOCUS_PULSE_RADIUS_RANGE_PX = 14;
+export const FOCUS_PULSE_MAX_ALPHA = 0.7;
+export const FOCUS_PULSE_Y_ASPECT = 0.5;
+export const FOCUS_PULSE_RING_COLOR = '#ffffff';
+
 // ── Camera ───────────────────────────────────────────────────
 export const CAMERA_FOLLOW_LERP = 0.1;
 export const CAMERA_FOLLOW_SNAP_THRESHOLD = 0.5;

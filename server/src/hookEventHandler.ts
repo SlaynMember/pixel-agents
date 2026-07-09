@@ -53,6 +53,27 @@ interface SessionLifecycleCallbacks {
   /** Called when a teammate should be removed (e.g. no longer in team config members).
    *  Removes the teammate agent from the office. */
   onTeammateRemoved?: (teammateAgentId: number) => void;
+  /** Called on UserPromptSubmit for an unknown session_id -- a candidate for a
+   *  pending tab-mode spawn (matched by its "(Name)" prompt prefix). Returns
+   *  true when a pending spawn was bound to this session; the caller then
+   *  discards any matching pending-external record so the same session isn't
+   *  ALSO adopted as a duplicate external agent. */
+  onPromptSubmit?: (
+    sessionId: string,
+    prompt: string,
+    transcriptPath: string | undefined,
+    cwd: string | undefined,
+  ) => boolean;
+  /** Called on SessionStart for an unknown session_id, just before it's stored
+   *  as a pending external session. Lets a pending tab-mode spawn record this
+   *  session as a fallback bind candidate -- consumed only at the spawn's
+   *  timeout, and only if UserPromptSubmit never matched. Record-only: does
+   *  NOT consume the session, so it's still adoptable as external if unbound. */
+  onSessionStartCandidate?: (
+    sessionId: string,
+    transcriptPath: string | undefined,
+    cwd: string | undefined,
+  ) => void;
 }
 
 export class HookEventHandler {
@@ -160,6 +181,39 @@ export class HookEventHandler {
       }
     }
 
+    // --- UserPromptSubmit: instant "active" for known agents; pending-spawn ---
+    // correlation primary for unknown ones (tab-mode "(Name)" prompt-prefix match).
+    // MUST run before the confirmPending block below -- otherwise an unconsumed
+    // UserPromptSubmit for a real external session would be indistinguishable
+    // from one that just bound a pending spawn, and (if it also confirmed a
+    // pending-external record) could create a duplicate agent.
+    if (normEvent.kind === 'promptSubmit') {
+      const knownAgentId = this.sessionRouter.resolve(event.session_id);
+      if (knownAgentId !== undefined) {
+        const agent = this.agents.get(knownAgentId);
+        if (agent) {
+          agent.hookDelivered = true;
+          cancelWaitingTimer(knownAgentId, this.waitingTimers);
+          agent.isWaiting = false;
+          this.agents.broadcast({ type: 'agentStatus', id: knownAgentId, status: 'active' });
+        }
+        return;
+      }
+      const bound = this.lifecycleCallbacks.onPromptSubmit?.(
+        event.session_id,
+        normEvent.prompt ?? '',
+        normEvent.transcriptPath,
+        normEvent.cwd,
+      );
+      if (bound) {
+        this.sessionRouter.discardPending(event.session_id);
+        return;
+      }
+      // Not consumed -- fall through so this event can still act as a
+      // legitimate confirmation event for a genuine pending external session
+      // (handled by the confirmPending block further down).
+    }
+
     // --- SessionStart: handle /clear for known agents, ignore unknown sessions ---
     // External session detection via SessionStart is deferred to Phase C.
     // For now, only use SessionStart for:
@@ -237,6 +291,10 @@ export class HookEventHandler {
           console.log(
             `[Pixel Agents] Hook: SessionStart(source=${source}) -> pending external session ${sid}..., awaiting confirmation`,
           );
+        // Record-only: lets a pending tab-mode spawn in the same project dir
+        // remember this session as a fallback bind candidate. Does NOT consume
+        // the session -- it's still adoptable as external if the spawn never binds.
+        this.lifecycleCallbacks.onSessionStartCandidate?.(event.session_id, transcriptPath, cwd);
         this.sessionRouter.storePending(event.session_id, {
           sessionId: event.session_id,
           transcriptPath,

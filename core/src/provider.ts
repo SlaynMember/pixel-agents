@@ -51,6 +51,16 @@ export type AgentEvent =
   | { kind: 'progress'; toolId: string; data: unknown }
   | { kind: 'permissionRequest' }
   | {
+      kind: 'promptSubmit';
+      /** The user's submitted prompt text. Used to correlate a pending tab-mode
+       *  spawn via its "(Name)" prefix. */
+      prompt?: string;
+      /** Path to the session's transcript file (if the provider uses one). */
+      transcriptPath?: string;
+      /** Working directory the session was started in. */
+      cwd?: string;
+    }
+  | {
       kind: 'sessionStart';
       source?: string;
       /** For external-session adoption: path to the session's transcript file

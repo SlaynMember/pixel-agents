@@ -681,6 +681,7 @@ export function OfficeCanvas({
           officeState.cameraFollowId = hitId;
         }
         onClick(hitId); // still focus terminal
+        officeState.triggerFocusPulse(hitId);
         return;
       }
 
