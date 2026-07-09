@@ -103,6 +103,7 @@ export function DebugView({
     const status = agentStatuses[id];
     const hasActiveTools = tools.some((t) => !t.done);
     const diag = diagnostics[id];
+    const name = officeState.characters.get(id)?.name;
     return (
       <div
         key={id}
@@ -114,6 +115,7 @@ export function DebugView({
             className={`rounded-none py-6 px-10 text-xl ${isSelected ? 'text-white font-bold' : ''}`}
           >
             Agent #{id}
+            {name ? ` (${name})` : ''}
           </span>
           <Button
             variant="ghost"

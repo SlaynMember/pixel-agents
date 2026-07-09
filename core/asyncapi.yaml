@@ -173,6 +173,9 @@ components:
           type: integer
         folderName:
           type: string
+        name:
+          type: string
+          description: Assigned display name (e.g. "Paul").
         isExternal:
           type: boolean
 
@@ -204,7 +207,7 @@ components:
         changes that the client missed. Includes seat/palette assignments.
       type: object
       additionalProperties: false
-      required: [type, agents, agentMeta, folderNames, externalAgents]
+      required: [type, agents, agentMeta, folderNames, externalAgents, names]
       properties:
         type:
           const: existingAgents
@@ -227,6 +230,11 @@ components:
           description: Map of agent ID (string) to external flag.
           additionalProperties:
             type: boolean
+        names:
+          type: object
+          description: Map of agent ID (string) to assigned display name.
+          additionalProperties:
+            type: string
 
     AgentStatus:
       description: Active vs waiting state for an agent (drives character animation).

@@ -160,6 +160,8 @@ export class AgentStateStore {
         jsonlFile: agent.jsonlFile,
         projectDir: agent.projectDir,
         folderName: agent.folderName,
+        name: agent.name,
+        isTab: agent.isTab || undefined,
         teamName: agent.teamName,
         agentName: agent.agentName,
         isTeamLead: agent.isTeamLead,

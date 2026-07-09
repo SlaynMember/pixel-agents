@@ -1,20 +1,25 @@
 {
   "name": "pixel-agents",
-  "displayName": "Pixel Agents",
+  "displayName": "Pixel Agents (Pattern3)",
   "description": "Pixel art office where your Claude Code agents come to life as animated characters",
-  "version": "1.3.0",
-  "publisher": "pablodelucca",
+  "version": "1.4.0",
+  "publisher": "pattern3",
   "repository": {
     "type": "git",
     "url": "https://github.com/pixel-agents-hq/pixel-agents"
   },
-  "workspaces": ["server", "webview-ui"],
+  "workspaces": [
+    "server",
+    "webview-ui"
+  ],
   "icon": "icon.png",
   "license": "MIT",
   "engines": {
     "vscode": "^1.105.0"
   },
-  "extensionKind": ["workspace"],
+  "extensionKind": [
+    "workspace"
+  ],
   "categories": [
     "Other"
   ],
@@ -66,6 +71,26 @@
           "type": "boolean",
           "default": false,
           "description": "Automatically spawn a Claude Code agent when VS Code starts, if no agents are currently running."
+        },
+        "pixel-agents.launchMode": {
+          "type": "string",
+          "enum": ["tab", "terminal"],
+          "default": "tab",
+          "description": "How new agents are launched: 'tab' opens Claude Code in an editor tab, 'terminal' launches it in a VS Code terminal."
+        },
+        "pixel-agents.agentNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": ["Paul", "Dot", "Mango", "Pixel", "Beans", "Juno", "Ivy", "Clyde"],
+          "description": "Names assigned to new agents, in order, before repeating with a numeric suffix."
+        },
+        "pixel-agents.hookEventMode": {
+          "type": "string",
+          "enum": ["minimal", "full"],
+          "default": "minimal",
+          "description": "Which Claude Code hook events to install. 'minimal' installs only lifecycle hooks (zero per-tool-call overhead; tool activity comes from transcript polling). 'full' installs all 14 events."
         }
       }
     }
@@ -141,5 +166,9 @@
     "@fastify/static": "^9.1.1",
     "@fastify/websocket": "^11.2.0",
     "fastify": "^5.8.5"
+  },
+  "allowScripts": {
+    "esbuild@0.28.0": true,
+    "esbuild@0.27.7": true
   }
 }

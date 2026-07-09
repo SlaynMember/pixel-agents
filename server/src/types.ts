@@ -22,6 +22,10 @@ export interface AgentState {
   hadToolsInTurn: boolean;
   /** Workspace folder name (only set for multi-root workspaces) */
   folderName?: string;
+  /** Assigned display name (e.g. "Paul") */
+  name?: string;
+  /** True when this agent was launched as an editor tab (Claude Code tab mode) rather than a terminal */
+  isTab?: boolean;
   /** Timestamp of last JSONL data received (ms since epoch) */
   lastDataAt: number;
   /** Total JSONL lines processed for this agent */
@@ -71,6 +75,10 @@ export interface PersistedAgent {
   projectDir: string;
   /** Workspace folder name (only set for multi-root workspaces) */
   folderName?: string;
+  /** Assigned display name (e.g. "Paul") */
+  name?: string;
+  /** True when this agent was launched as an editor tab (Claude Code tab mode) rather than a terminal */
+  isTab?: boolean;
 
   // -- Agent Teams --
   teamName?: string;

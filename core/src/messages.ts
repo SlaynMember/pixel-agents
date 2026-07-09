@@ -66,6 +66,7 @@ export interface AgentCreated {
   type: 'agentCreated';
   id: number;
   folderName?: string;
+  name?: string;
   isExternal?: boolean;
 }
 
@@ -85,6 +86,7 @@ export interface ExistingAgents {
   agentMeta: Record<string, AgentSeatMeta>;
   folderNames: Record<string, string>;
   externalAgents: Record<string, boolean>;
+  names: Record<string, string>;
 }
 
 export interface AgentSeatMeta {

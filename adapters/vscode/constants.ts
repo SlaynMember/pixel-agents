@@ -18,6 +18,9 @@ export const GLOBAL_KEY_HOOKS_INFO_SHOWN = 'pixel-agents.hooksInfoShown';
 // ── VS Code Settings (contributes.configuration keys) ───────
 export const CONFIG_KEY_AUTO_SHOW_PANEL = 'pixel-agents.autoShowPanel';
 export const CONFIG_KEY_AUTO_SPAWN_AGENT = 'pixel-agents.autoSpawnAgent';
+export const CONFIG_KEY_LAUNCH_MODE = 'pixel-agents.launchMode';
+export const CONFIG_KEY_AGENT_NAMES = 'pixel-agents.agentNames';
+export const CONFIG_KEY_HOOK_EVENT_MODE = 'pixel-agents.hookEventMode';
 
 // ── VS Code Identifiers ─────────────────────────────────────
 export const VIEW_ID = 'pixel-agents.panelView';

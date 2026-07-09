@@ -47,6 +47,7 @@ import {
   sendExistingAgents,
   sendLayout,
 } from './agentManager.js';
+import { assignAgentName } from './agentNames.js';
 import {
   CONFIG_KEY_AUTO_SHOW_PANEL,
   CONFIG_KEY_AUTO_SPAWN_AGENT,
@@ -107,10 +108,15 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
     this.adapter = adapter;
     this.store.setAdapter(this.adapter);
     this.store.on('agentAdded', (id, agent) => {
+      if (!agent.name && agent.leadAgentId === undefined) {
+        agent.name = assignAgentName(this.store);
+        this.store.persist();
+      }
       this.sendOrBuffer({
         type: 'agentCreated',
         id,
         folderName: agent.folderName,
+        name: agent.name,
         isExternal: agent.isExternal || undefined,
         isTeammate: agent.leadAgentId !== undefined || undefined,
         teammateName: agent.agentName,

@@ -265,6 +265,8 @@ export function persistAgents(agents: AgentStateStore, adapter: StateAdapter): v
       jsonlFile: agent.jsonlFile,
       projectDir: agent.projectDir,
       folderName: agent.folderName,
+      name: agent.name,
+      isTab: agent.isTab || undefined,
       teamName: agent.teamName,
       agentName: agent.agentName,
       isTeamLead: agent.isTeamLead,
@@ -350,6 +352,8 @@ export function restoreAgents(
       linesProcessed: 0,
       seenUnknownRecordTypes: new Set(),
       folderName: p.folderName,
+      name: p.name,
+      isTab: p.isTab,
       hookDelivered: false,
       inputTokens: 0,
       outputTokens: 0,
@@ -504,12 +508,16 @@ export function sendExistingAgents(
   // Include folderName and isExternal per agent
   const folderNames: Record<number, string> = {};
   const externalAgents: Record<number, boolean> = {};
+  const names: Record<number, string> = {};
   for (const [id, agent] of agents) {
     if (agent.folderName) {
       folderNames[id] = agent.folderName;
     }
     if (agent.isExternal) {
       externalAgents[id] = true;
+    }
+    if (agent.name) {
+      names[id] = agent.name;
     }
   }
   console.log(
@@ -522,6 +530,7 @@ export function sendExistingAgents(
     agentMeta,
     folderNames,
     externalAgents,
+    names,
   });
   // Note: sendCurrentAgentStatuses is called separately AFTER layoutLoaded
   // so that agentStatus/agentToolStart messages arrive after characters are created.
