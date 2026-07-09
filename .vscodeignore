@@ -63,3 +63,6 @@ dist/webview/characters.png
 
 # TODO: reevaluate if this new structure makes sense, locally my vsix size dropped drastically since it doesn't bundle playwright and test results
 # maybe it makes more sense to ignore all and do !exceptions to include
+
+allure-results/**
+allure-report/**
