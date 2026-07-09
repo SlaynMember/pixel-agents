@@ -54,6 +54,8 @@ import {
 } from './agentManager.js';
 import { assignAgentName } from './agentNames.js';
 import {
+  BATCH_FLUSH_DELAY_MS,
+  BATCHABLE_MESSAGE_TYPES,
   CLAUDE_CODE_EDITOR_OPEN_COMMAND,
   CONFIG_KEY_AUTO_SHOW_PANEL,
   CONFIG_KEY_AUTO_SPAWN_AGENT,
@@ -86,6 +88,14 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
   // start writing within ~3 s of agent spawn) silently never reach the UI.
   private isWebviewReady = false;
   private pendingBroadcasts: Array<Record<string, unknown>> = [];
+
+  // Once ready, BATCHABLE_MESSAGE_TYPES messages are queued here and flushed
+  // as a single `batch` postMessage after BATCH_FLUSH_DELAY_MS. Cuts webview
+  // postMessage traffic during bursty tool activity without adding perceptible
+  // latency. Non-batchable messages flush this queue first, then post
+  // immediately, so total delivery order is preserved.
+  private batchQueue: Array<Record<string, unknown>> = [];
+  private batchTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Shared agent lifecycle core (timer Maps, scanners, hook handler, dismissal tracker)
   private runtime: AgentRuntime;
@@ -163,12 +173,21 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
 
   /** Post a message to the webview, or buffer it if the iframe isn't ready
    *  yet. Drops silently when no view exists at all (matches prior behavior).
-   *  Flushed by the `webviewReady` handler in resolveWebviewView. */
+   *  Flushed by the `webviewReady` handler in resolveWebviewView. Once ready,
+   *  batchable messages are coalesced (see queueBatchMessage); everything
+   *  else flushes the batch queue first, then posts immediately, so a
+   *  non-batchable message (e.g. agentClosed) can never overtake queued
+   *  tool events. */
   private sendOrBuffer(message: Record<string, unknown>): void {
     const wv = this.webview;
     if (!wv) return;
     if (this.isWebviewReady) {
-      wv.postMessage(message);
+      if (BATCHABLE_MESSAGE_TYPES.has(message.type as string)) {
+        this.queueBatchMessage(message);
+      } else {
+        this.flushBatch();
+        wv.postMessage(message);
+      }
       return;
     }
     if (this.pendingBroadcasts.length >= MAX_PENDING_BROADCASTS) {
@@ -178,6 +197,41 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
       this.pendingBroadcasts.shift();
     }
     this.pendingBroadcasts.push(message);
+  }
+
+  /** Queue a batchable message. agentStatus/agentTokenUsage coalesce by
+   *  replacing an already-queued entry of the same type+id (only the latest
+   *  status/token count per agent matters); everything else just appends.
+   *  Arms the flush timer on the first message in an empty queue. */
+  private queueBatchMessage(message: Record<string, unknown>): void {
+    const type = message.type as string;
+    if (type === 'agentStatus' || type === 'agentTokenUsage') {
+      const existingIndex = this.batchQueue.findIndex(
+        (m) => m.type === type && m.id === message.id,
+      );
+      if (existingIndex !== -1) {
+        this.batchQueue[existingIndex] = message;
+      } else {
+        this.batchQueue.push(message);
+      }
+    } else {
+      this.batchQueue.push(message);
+    }
+    if (!this.batchTimer) {
+      this.batchTimer = setTimeout(() => this.flushBatch(), BATCH_FLUSH_DELAY_MS);
+    }
+  }
+
+  /** Send the queued batch messages as one `batch` postMessage, if any. */
+  private flushBatch(): void {
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.batchTimer = null;
+    }
+    if (this.batchQueue.length === 0) return;
+    const messages = this.batchQueue;
+    this.batchQueue = [];
+    this.webview?.postMessage({ type: 'batch', messages });
   }
 
   /** Reads pixel-agents.hookEventMode (default "minimal"). */
@@ -247,6 +301,11 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
     // sendCurrentAgentStatuses + asset loaders).
     this.isWebviewReady = false;
     this.pendingBroadcasts = [];
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.batchTimer = null;
+    }
+    this.batchQueue = [];
     webviewView.webview.options = { enableScripts: true };
     webviewView.webview.html = getWebviewContent(webviewView.webview, this.extensionUri);
 
@@ -882,6 +941,10 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
     this.layoutWatcher = null;
     this.hookEventModeListener?.dispose();
     this.hookEventModeListener = undefined;
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.batchTimer = null;
+    }
     this.store.dispose();
   }
 }

@@ -113,6 +113,8 @@ components:
         - $ref: '#/components/schemas/WorkspaceFolders'
         # Diagnostics
         - $ref: '#/components/schemas/AgentDiagnostics'
+        # Batching
+        - $ref: '#/components/schemas/Batch'
       discriminator: type
 
     ClientMessage:
@@ -671,6 +673,24 @@ components:
           description: Per-agent diagnostic info; shape opaque to the protocol.
           items:
             type: object
+
+    Batch:
+      description: |
+        Coalesced batch of high-frequency messages (tool activity, agent
+        status, token usage), sent as one postMessage after a short delay
+        (~50ms) to reduce webview traffic during bursty activity. Clients
+        unwrap `messages` and dispatch each one through the normal handler.
+        Never itself nested inside another batch.
+      type: object
+      additionalProperties: false
+      required: [type, messages]
+      properties:
+        type:
+          const: batch
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServerMessage'
 
     # ── Client message variants ────────────────────────────────────
 

@@ -37,3 +37,21 @@ export const TAB_SPAWN_FIRST_PROMPT_TEMPLATE =
   '({name}) reporting for duty. Your agent name is {name}. When you or the system ' +
   'generate a title for this session, keep "({name}) " at the start of the title. ' +
   'Wait for my instructions.';
+
+// ── Webview Broadcast Batching ────────────────────────────────
+/** High-frequency messages coalesced into a single `batch` postMessage instead
+ *  of being sent one at a time. Everything else (agent lifecycle, permission
+ *  prompts, layout/assets/settings) is latency-sensitive and stays immediate. */
+export const BATCHABLE_MESSAGE_TYPES = new Set([
+  'agentToolStart',
+  'agentToolDone',
+  'agentStatus',
+  'agentTokenUsage',
+  'subagentToolStart',
+  'subagentToolDone',
+  'agentToolsClear',
+  'subagentClear',
+  'agentTeamInfo',
+]);
+/** Delay before flushing the queued batchable messages as one `batch` message. */
+export const BATCH_FLUSH_DELAY_MS = 50;

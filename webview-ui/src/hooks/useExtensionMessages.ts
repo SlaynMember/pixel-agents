@@ -128,6 +128,13 @@ export function useExtensionMessages(
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handler = (msg: any) => {
+      // Coalesced batch (see PixelAgentsViewProvider.sendOrBuffer) -- unwrap
+      // and dispatch each inner message through this same handler.
+      if (msg.type === 'batch') {
+        for (const m of msg.messages) handler(m);
+        return;
+      }
+
       const os = getOfficeState();
       // CI / e2e diagnostic: record every received transport message on the
       // window-side log. The fixture reads window.__pixelAgentsTestHooks.

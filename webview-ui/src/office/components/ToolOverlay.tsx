@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { Button } from '../../components/ui/Button.js';
 import {
@@ -20,7 +20,7 @@ import {
 } from '../../constants.js';
 import type { SubagentCharacter } from '../../hooks/useExtensionMessages.js';
 import type { OfficeState } from '../engine/officeState.js';
-import type { ToolActivity } from '../types.js';
+import type { Character, ToolActivity } from '../types.js';
 import { CharacterState, TILE_SIZE } from '../types.js';
 
 // Both turn-end states show the green checkmark bubble. A finished turn (Stop)
@@ -28,6 +28,11 @@ import { CharacterState, TILE_SIZE } from '../types.js';
 // going idle waiting on the user (Notification(idle_prompt)) additionally
 // surfaces this label. Driven by Character.waitingAwaitingInput.
 const WAITING_INPUT_ACTIVITY_TEXT = 'Waiting for input';
+
+// data-top-offset values for the two overlay div variants (see computeOverlayPos).
+const PANEL_TOP_OFFSET_NORMAL = 28;
+const PANEL_TOP_OFFSET_EXTRA_LINES = 34;
+const MARKER_TOP_OFFSET = 0;
 
 interface ToolOverlayProps {
   officeState: OfficeState;
@@ -80,6 +85,47 @@ function getFuelColor(ratio: number): string {
   return FUEL_COLOR_OK;
 }
 
+/**
+ * Device-pixel screen position of a character's overlay anchor (top-left of
+ * the character's tile, before the panel/marker's own vertical offset).
+ * Shared by the render-time JSX (initial paint) and the per-frame rAF loop
+ * (continuous position tracking while the character walks or the view pans),
+ * so the two stay in sync by construction.
+ */
+function computeOverlayPos(
+  ch: Character,
+  deviceOffsetX: number,
+  deviceOffsetY: number,
+  dpr: number,
+  zoom: number,
+): { screenX: number; screenY: number } {
+  const sittingOffset = ch.state === CharacterState.TYPE ? CHARACTER_SITTING_OFFSET_PX : 0;
+  const screenX = (deviceOffsetX + ch.x * zoom) / dpr;
+  const screenY =
+    (deviceOffsetY + (ch.y + sittingOffset - TOOL_OVERLAY_VERTICAL_OFFSET) * zoom) / dpr;
+  return { screenX, screenY };
+}
+
+/**
+ * Cheap per-frame change signature for state that lives only on officeState
+ * (mutated imperatively, outside React props/state): hover/select, and per-
+ * character bubble/activity/team/token fields. setTick only fires when this
+ * changes, so steady-state frames (nothing changed, or only positions moved)
+ * cost zero React reconciles.
+ */
+function buildStructuralSignature(officeState: OfficeState): string {
+  const parts: string[] = [String(officeState.hoveredAgentId), String(officeState.selectedAgentId)];
+  for (const ch of officeState.characters.values()) {
+    parts.push(
+      `${ch.id}:${ch.bubbleType}:${ch.waitingAwaitingInput}:${ch.matrixEffect}:${ch.isActive}:` +
+        `${ch.teamName}:${ch.agentName}:${ch.isTeamLead}:${ch.teamUsesTmux}:` +
+        `${ch.inputTokens}:${ch.outputTokens}`,
+    );
+  }
+  parts.push(String(officeState.characters.size));
+  return parts.join('|');
+}
+
 export function ToolOverlay({
   officeState,
   agents,
@@ -92,15 +138,54 @@ export function ToolOverlay({
   alwaysShowOverlay,
 }: ToolOverlayProps) {
   const [, setTick] = useState(0);
+  // Mounted overlay root divs, keyed by character id. Registered via ref
+  // callbacks below; the rAF loop writes left/top on these directly (no
+  // React) so walking/panning doesn't cost a reconcile every frame.
+  const elRefs = useRef(new Map<number, HTMLDivElement>());
+  const prevSignatureRef = useRef('');
+
   useEffect(() => {
     let rafId = 0;
     const tick = () => {
-      setTick((n) => n + 1);
+      const containerEl = containerRef.current;
+      if (containerEl && elRefs.current.size > 0) {
+        const rect = containerEl.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        const canvasW = Math.round(rect.width * dpr);
+        const canvasH = Math.round(rect.height * dpr);
+        const layout = officeState.getLayout();
+        const mapW = layout.cols * TILE_SIZE * zoom;
+        const mapH = layout.rows * TILE_SIZE * zoom;
+        const deviceOffsetX = Math.floor((canvasW - mapW) / 2) + Math.round(panRef.current.x);
+        const deviceOffsetY = Math.floor((canvasH - mapH) / 2) + Math.round(panRef.current.y);
+
+        for (const [id, node] of elRefs.current) {
+          const ch = officeState.characters.get(id);
+          if (!ch) continue;
+          const { screenX, screenY } = computeOverlayPos(
+            ch,
+            deviceOffsetX,
+            deviceOffsetY,
+            dpr,
+            zoom,
+          );
+          const topOffset = Number(node.dataset.topOffset ?? MARKER_TOP_OFFSET);
+          node.style.left = `${screenX}px`;
+          node.style.top = `${screenY - topOffset}px`;
+        }
+      }
+
+      const signature = buildStructuralSignature(officeState);
+      if (signature !== prevSignatureRef.current) {
+        prevSignatureRef.current = signature;
+        setTick((n) => n + 1);
+      }
+
       rafId = requestAnimationFrame(tick);
     };
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, []);
+  }, [officeState, containerRef, panRef, zoom]);
 
   const el = containerRef.current;
   if (!el) return null;
@@ -133,11 +218,14 @@ export function ToolOverlay({
         // Only show for hovered or selected agents (unless always-show is on)
         if (!alwaysShowOverlay && !isSelected && !isHovered) return null;
 
-        // Position above character
-        const sittingOffset = ch.state === CharacterState.TYPE ? CHARACTER_SITTING_OFFSET_PX : 0;
-        const screenX = (deviceOffsetX + ch.x * zoom) / dpr;
-        const screenY =
-          (deviceOffsetY + (ch.y + sittingOffset - TOOL_OVERLAY_VERTICAL_OFFSET) * zoom) / dpr;
+        const { screenX, screenY } = computeOverlayPos(ch, deviceOffsetX, deviceOffsetY, dpr, zoom);
+        const registerEl = (node: HTMLDivElement | null) => {
+          if (node) {
+            elRefs.current.set(id, node);
+          } else {
+            elRefs.current.delete(id);
+          }
+        };
 
         // A "Done" agent (finished turn: waiting bubble without awaitingInput)
         // shows ONLY its floating green checkmark bubble, never the label panel
@@ -150,6 +238,8 @@ export function ToolOverlay({
           return (
             <div
               key={id}
+              ref={registerEl}
+              data-top-offset={MARKER_TOP_OFFSET}
               className="absolute"
               style={{ left: screenX, top: screenY, pointerEvents: 'none' }}
               data-testid="agent-overlay"
@@ -203,14 +293,17 @@ export function ToolOverlay({
         const totalTokens = ch.inputTokens + ch.outputTokens;
         const tokenRatio = totalTokens / MAX_CONTEXT_TOKENS;
         const hasExtraLines = !!(ch.folderName || teamRoleLabel || ch.name);
+        const topOffset = hasExtraLines ? PANEL_TOP_OFFSET_EXTRA_LINES : PANEL_TOP_OFFSET_NORMAL;
 
         return (
           <div
             key={id}
+            ref={registerEl}
+            data-top-offset={topOffset}
             className="absolute flex flex-col items-center -translate-x-1/2"
             style={{
               left: screenX,
-              top: screenY - (hasExtraLines ? 34 : 28),
+              top: screenY - topOffset,
               pointerEvents: isSelected ? 'auto' : 'none',
               opacity: alwaysShowOverlay && !isSelected && !isHovered ? (isSub ? 0.5 : 0.75) : 1,
               zIndex: isSelected ? 42 : 41,

@@ -34,7 +34,8 @@ export type ServerMessage =
   | SettingsLoaded
   | ExternalAssetDirectoriesUpdated
   | WorkspaceFolders
-  | AgentDiagnostics;
+  | AgentDiagnostics
+  | Batch;
 
 export type ClientMessage =
   | WebviewReady
@@ -282,6 +283,40 @@ export interface WorkspaceFolder {
 export interface AgentDiagnostics {
   type: 'agentDiagnostics';
   agents: Record<string, any>[];
+}
+
+export interface Batch {
+  type: 'batch';
+  messages: (
+    | ProviderCapabilities
+    | AgentCreated
+    | AgentClosed
+    | AgentSelected
+    | ExistingAgents
+    | AgentStatus
+    | AgentToolStart
+    | AgentToolDone
+    | AgentToolsClear
+    | AgentToolPermission
+    | AgentToolPermissionClear
+    | SubagentToolStart
+    | SubagentToolDone
+    | SubagentClear
+    | SubagentToolPermission
+    | AgentTeamInfo
+    | AgentTokenUsage
+    | LayoutLoaded
+    | FurnitureAssetsLoaded
+    | CharacterSpritesLoaded
+    | PetSpritesLoaded
+    | FloorTilesLoaded
+    | WallTilesLoaded
+    | SettingsLoaded
+    | ExternalAssetDirectoriesUpdated
+    | WorkspaceFolders
+    | AgentDiagnostics
+    | Batch
+  )[];
 }
 
 export interface WebviewReady {
