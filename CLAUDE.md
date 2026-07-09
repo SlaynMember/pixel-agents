@@ -609,3 +609,14 @@ Supporting: `wall-tile-editor.html` (wall sprite editing), `jsonl-viewer.html` (
 - npm package: `pixel-agents` (CLI bin: `pixel-agents`)
 - GitHub: `https://github.com/pixel-agents-hq/pixel-agents`
 - License: MIT
+
+## WARNING — test suite is NOT isolated from the real ~/.pixel-agents (Will's fork)
+
+`npm run test:server` writes to the REAL `~/.pixel-agents/` (layout.json, config.json,
+vscode-state.json, standalone-state.json): `fileStateAdapter.ts` / `layoutPersistence.ts`
+resolve `os.homedir()` directly and the tests never mock it. A test run on 2026-07-09
+clobbered Will's office layout (recovered from a session transcript; backup kept at
+`~/.pixel-agents/layout.backup-2026-07-09.json`). Tests also fight any live panel server
+(server.test.ts ECONNRESET "flakes" = port/server.json collisions with the real instance).
+Until homedir isolation is fixed (upstream bug as of 928ccd4): back up `~/.pixel-agents/`
+before running server tests, and close the Pixel Agents panel first.
