@@ -82,8 +82,13 @@ export interface HookProvider {
     event: AgentEvent;
   } | null;
 
-  /** Install hook scripts that POST to our server. */
-  installHooks(serverUrl: string, authToken: string): Promise<void>;
+  /** Install hook scripts that POST to our server. `opts.events` selects which
+   *  hook events to install (defaults to the provider's full set). */
+  installHooks(
+    serverUrl: string,
+    authToken: string,
+    opts?: { events?: readonly string[] },
+  ): Promise<void>;
   /** Remove installed hook scripts. */
   uninstallHooks(): Promise<void>;
   /** Check if hooks are currently installed. */

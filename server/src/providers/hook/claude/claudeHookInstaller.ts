@@ -2,11 +2,15 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { HOOK_SCRIPTS_DIR } from '../../../constants.js';
-import { CLAUDE_HOOK_EVENTS, CLAUDE_HOOK_SCRIPT_NAME } from './constants.js';
+import { HOOK_SCRIPTS_DIR, SERVER_JSON_DIR, SERVER_JSON_NAME } from '../../../constants.js';
+import { CLAUDE_HOOK_EVENTS_FULL, CLAUDE_HOOK_SCRIPT_NAME } from './constants.js';
 
 /** Marker string used to identify Pixel Agents hook entries in Claude's settings. */
 const HOOK_SCRIPT_MARKER = CLAUDE_HOOK_SCRIPT_NAME;
+
+/** Path (POSIX-style) to the server discovery file, relative to the user's home
+ *  directory: SERVER_JSON_DIR/SERVER_JSON_NAME (".pixel-agents/server.json"). */
+const SERVER_JSON_RELATIVE_PATH = `${SERVER_JSON_DIR}/${SERVER_JSON_NAME}`;
 
 /** A single hook entry in Claude Code's ~/.claude/settings.json hooks config. */
 interface ClaudeHookEntry {
@@ -74,10 +78,25 @@ function isOurHookEntry(entry: ClaudeHookEntry): boolean {
   );
 }
 
-/** Build the shell command that Claude Code will execute for each hook event. */
+/**
+ * Build the shell command that Claude Code will execute for each hook event.
+ * Wrapped with an existence check on ~/.pixel-agents/server.json (WI-7) so no
+ * node process spawns when the extension panel/server isn't running. The
+ * %USERPROFILE%/$HOME reference is a literal env var evaluated by the shell at
+ * hook-run time (the command string is baked into ~/.claude/settings.json), not
+ * resolved here. The false-branch/`|| true` keeps exit code 0 so Claude Code
+ * never surfaces a hook warning when the file is missing. The ownership marker
+ * (isOurHookEntry, claude-hook.js substring) still matches the wrapped command,
+ * so idempotent replace/uninstall is unaffected.
+ */
 function makeHookCommand(): string {
   const scriptPath = getHookScriptPath();
-  return `node "${scriptPath}"`;
+  if (process.platform === 'win32') {
+    const checkPath = `%USERPROFILE%\\${SERVER_JSON_RELATIVE_PATH.replace(/\//g, '\\')}`;
+    return `cmd /c if exist "${checkPath}" node "${scriptPath}"`;
+  }
+  const checkPath = `$HOME/${SERVER_JSON_RELATIVE_PATH}`;
+  return `[ -f "${checkPath}" ] && node "${scriptPath}" || true`;
 }
 
 /** Create a hook entry object for Claude's settings.json. Matcher is empty (catch-all). */
@@ -94,11 +113,11 @@ function makeHookEntry(): ClaudeHookEntry {
   };
 }
 
-/** Check if Pixel Agents hooks are already installed in ~/.claude/settings.json. */
-export function areHooksInstalled(): boolean {
+/** Check if Pixel Agents hooks are already installed in ~/.claude/settings.json
+ *  for the given event set (defaults to the full set). */
+export function areHooksInstalled(events: readonly string[] = CLAUDE_HOOK_EVENTS_FULL): boolean {
   const settings = readClaudeSettings();
   if (!settings.hooks) return false;
-  const events = CLAUDE_HOOK_EVENTS;
   return events.every((event) => {
     const entries = settings.hooks?.[event];
     return Array.isArray(entries) && entries.some(isOurHookEntry);
@@ -106,37 +125,44 @@ export function areHooksInstalled(): boolean {
 }
 
 /**
- * Install Pixel Agents hook entries into ~/.claude/settings.json for
- * Notification, Stop, and PermissionRequest events. Idempotent: removes
- * any existing Pixel Agents entries before adding fresh ones.
+ * Install Pixel Agents hook entries into ~/.claude/settings.json for the given
+ * event set (defaults to the full set). Always strips every existing Pixel
+ * Agents entry FIRST — across every event key currently in settings AND every
+ * event in the full set — then adds fresh entries for `events`. This makes a
+ * full -> minimal switch remove the stale tool-event blocks (and vice versa),
+ * and self-cleans any legacy install (e.g. the old pablodelucca extension,
+ * or a stale script path) since the ownership marker matches regardless of
+ * who wrote the entry.
  */
-export function installHooks(): void {
+export function installHooks(events: readonly string[] = CLAUDE_HOOK_EVENTS_FULL): void {
   const settings = readClaudeSettings();
   if (!settings.hooks) {
     settings.hooks = {};
   }
+  const hooks = settings.hooks;
 
-  const events = CLAUDE_HOOK_EVENTS;
-  let changed = false;
+  const eventsToStrip = new Set<string>([...Object.keys(hooks), ...CLAUDE_HOOK_EVENTS_FULL]);
+  for (const event of eventsToStrip) {
+    const entries = hooks[event];
+    if (!Array.isArray(entries)) continue;
+    const filtered = entries.filter((e) => !isOurHookEntry(e));
+    if (filtered.length > 0) {
+      hooks[event] = filtered;
+    } else {
+      delete hooks[event];
+    }
+  }
 
   for (const event of events) {
-    if (!Array.isArray(settings.hooks[event])) {
-      settings.hooks[event] = [];
-    }
-    const entries = settings.hooks[event];
-    // Remove any existing Pixel Agents entries (in case script path changed)
-    const filtered = entries.filter((e) => !isOurHookEntry(e));
-    filtered.push(makeHookEntry());
-    if (JSON.stringify(filtered) !== JSON.stringify(entries)) {
-      settings.hooks[event] = filtered;
-      changed = true;
-    }
+    const entries = Array.isArray(hooks[event]) ? hooks[event] : [];
+    entries.push(makeHookEntry());
+    hooks[event] = entries;
   }
 
-  if (changed) {
-    writeClaudeSettings(settings);
-    console.log('[Pixel Agents] Hooks installed in ~/.claude/settings.json');
-  }
+  writeClaudeSettings(settings);
+  console.log(
+    `[Pixel Agents] Hooks installed in ~/.claude/settings.json (${events.length} events)`,
+  );
 }
 
 /** Remove all Pixel Agents hook entries from ~/.claude/settings.json. Cleans up empty objects. */

@@ -20,6 +20,17 @@ const EMPTY_EXEMPT_TOOLS: ReadonlySet<string> = new Set();
  *  Registered once at startup via setHookProvider(). Functions below assume it's set. */
 let hookProvider: HookProvider | null = null;
 
+/** True when the installed hook set includes per-tool-call events (PreToolUse/
+ *  PostToolUse), i.e. "full" hook mode. False in "minimal" mode, where
+ *  SessionStart/Stop still set agent.hookDelivered but tool start/done never
+ *  arrive via hooks — JSONL polling must keep driving those broadcasts.
+ *  Set by the extension at startup and whenever the hook event mode changes. */
+let hookToolEventsActive = true;
+
+export function setHookToolEventsActive(active: boolean): void {
+  hookToolEventsActive = active;
+}
+
 /** Permission-exempt tools come from the active provider. Fail-open if unset. */
 function exemptTools(): ReadonlySet<string> {
   return hookProvider?.permissionExemptTools ?? EMPTY_EXEMPT_TOOLS;
@@ -53,6 +64,10 @@ export function processTranscriptLine(
   if (!agent) return;
   agent.lastDataAt = Date.now();
   agent.linesProcessed++;
+  // Gates the three tool-broadcast suppressions below (agentToolStart/agentToolDone).
+  // All other hookDelivered gates in this function stay on the raw flag — Stop/
+  // PermissionRequest/Notification hooks remain exact in minimal mode.
+  const hookHandlesTools = agent.hookDelivered && hookToolEventsActive;
   try {
     const record = JSON.parse(line);
 
@@ -172,7 +187,7 @@ export function processTranscriptLine(
             // tool activity is displayed correctly.
             const isSubagentSpawn = isSubagentTool(toolName);
             const useJsonlToolEvents = agent.hookDelivered && hasInlineTeammates(agentId, agents);
-            if (!agent.hookDelivered || useJsonlToolEvents || isSubagentSpawn) {
+            if (!hookHandlesTools || useJsonlToolEvents || isSubagentSpawn) {
               const runInBackground = isSubagentSpawn && block.input?.run_in_background === true;
               agents.broadcast({
                 type: 'agentToolStart',
@@ -256,7 +271,7 @@ export function processTranscriptLine(
               const isCompletedAgentTool =
                 completedToolName === 'Task' || completedToolName === 'Agent';
               const useJsonlToolEvents = agent.hookDelivered && hasInlineTeammates(agentId, agents);
-              if (!agent.hookDelivered || useJsonlToolEvents || isCompletedAgentTool) {
+              if (!hookHandlesTools || useJsonlToolEvents || isCompletedAgentTool) {
                 const toolId = completedToolId;
                 setTimeout(() => {
                   agents.broadcast({
@@ -307,7 +322,7 @@ export function processTranscriptLine(
             agent.activeToolIds.delete(completedToolId);
             agent.activeToolStatuses.delete(completedToolId);
             agent.activeToolNames.delete(completedToolId);
-            if (!agent.hookDelivered) {
+            if (!hookHandlesTools) {
               const toolId = completedToolId;
               setTimeout(() => {
                 agents.broadcast({

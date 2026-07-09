@@ -238,8 +238,12 @@ function normalizeHookEvent(
 
 // ── Installer wrappers: adapt sync signatures to async interface ──
 
-function installHooks(_serverUrl: string, _authToken: string): Promise<void> {
-  installerInstallHooks();
+function installHooks(
+  _serverUrl: string,
+  _authToken: string,
+  opts?: { events?: readonly string[] },
+): Promise<void> {
+  installerInstallHooks(opts?.events);
   return Promise.resolve();
 }
 

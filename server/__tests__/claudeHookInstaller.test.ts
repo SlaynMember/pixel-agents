@@ -3,6 +3,11 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  CLAUDE_HOOK_EVENTS_FULL,
+  CLAUDE_HOOK_EVENTS_MINIMAL,
+} from '../src/providers/hook/claude/constants.js';
+
 let tmpBase: string;
 
 vi.mock('os', async () => {
@@ -123,5 +128,93 @@ describe('claudeHookInstaller', () => {
     const stat = fs.statSync(dst);
     // Check owner execute bit
     expect(stat.mode & 0o100).toBeTruthy();
+  });
+
+  // 11. Command is wrapped with a server.json existence check (WI-7)
+  it('wraps the hook command with a server.json existence check', () => {
+    installHooks();
+    const hooks = readSettings().hooks as Record<
+      string,
+      Array<{ hooks: Array<{ command: string }> }>
+    >;
+    const command = hooks['Stop'][0].hooks[0].command;
+    expect(command).toContain('claude-hook.js');
+    expect(command).toContain('server.json');
+    if (process.platform === 'win32') {
+      expect(command).toContain('cmd /c if exist');
+      expect(command).toContain('%USERPROFILE%\\.pixel-agents\\server.json');
+    } else {
+      expect(command.startsWith('[ -f "$HOME/.pixel-agents/server.json" ]')).toBe(true);
+      expect(command.endsWith('|| true')).toBe(true);
+    }
+  });
+
+  // 12. installHooks(MINIMAL) installs only the minimal event set
+  it('installHooks(MINIMAL) installs only the minimal event set', () => {
+    installHooks(CLAUDE_HOOK_EVENTS_MINIMAL);
+    const hooks = readSettings().hooks as Record<string, unknown[]>;
+    for (const event of CLAUDE_HOOK_EVENTS_MINIMAL) {
+      expect(hooks[event]).toHaveLength(1);
+    }
+    const fullOnlyEvents = CLAUDE_HOOK_EVENTS_FULL.filter(
+      (e) => !(CLAUDE_HOOK_EVENTS_MINIMAL as readonly string[]).includes(e),
+    );
+    expect(fullOnlyEvents).toHaveLength(8);
+    for (const event of fullOnlyEvents) {
+      expect(hooks[event]).toBeUndefined();
+    }
+  });
+
+  // 13. full -> minimal strips the stale per-tool-call event blocks
+  it('switching from full to minimal removes the stale tool-event blocks', () => {
+    installHooks(CLAUDE_HOOK_EVENTS_FULL);
+    installHooks(CLAUDE_HOOK_EVENTS_MINIMAL);
+    const hooks = readSettings().hooks as Record<string, unknown[]>;
+    expect(hooks['PreToolUse']).toBeUndefined();
+    expect(hooks['PostToolUse']).toBeUndefined();
+    expect(hooks['SubagentStart']).toBeUndefined();
+    expect(hooks['TaskCreated']).toBeUndefined();
+    for (const event of CLAUDE_HOOK_EVENTS_MINIMAL) {
+      expect(hooks[event]).toHaveLength(1);
+    }
+  });
+
+  // 14. minimal -> full re-installs the tool-event blocks
+  it('switching from minimal to full re-installs the tool-event blocks', () => {
+    installHooks(CLAUDE_HOOK_EVENTS_MINIMAL);
+    installHooks(CLAUDE_HOOK_EVENTS_FULL);
+    const hooks = readSettings().hooks as Record<string, unknown[]>;
+    for (const event of CLAUDE_HOOK_EVENTS_FULL) {
+      expect(hooks[event]).toHaveLength(1);
+    }
+  });
+
+  // 15. areHooksInstalled checks only the passed event set
+  it('areHooksInstalled(events) checks only the passed event set', () => {
+    installHooks(CLAUDE_HOOK_EVENTS_MINIMAL);
+    expect(areHooksInstalled(CLAUDE_HOOK_EVENTS_MINIMAL)).toBe(true);
+    expect(areHooksInstalled(CLAUDE_HOOK_EVENTS_FULL)).toBe(false);
+  });
+
+  // 16. installHooks self-cleans a stale/legacy marker entry outside the requested set
+  it('installHooks strips stale marker entries from events outside the requested set', () => {
+    installHooks(CLAUDE_HOOK_EVENTS_FULL);
+    installHooks(CLAUDE_HOOK_EVENTS_MINIMAL);
+
+    // Simulate a stale full-only entry left behind by an old install (e.g. the
+    // pablodelucca extension, or a prior script path) that this run never wrote.
+    const settingsPath = path.join(tmpBase, '.claude', 'settings.json');
+    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+    settings.hooks['PreToolUse'] = [
+      {
+        matcher: '',
+        hooks: [{ type: 'command', command: 'node "/old/path/claude-hook.js"', timeout: 5 }],
+      },
+    ];
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+
+    installHooks(CLAUDE_HOOK_EVENTS_MINIMAL);
+    const hooks = readSettings().hooks as Record<string, unknown[]>;
+    expect(hooks['PreToolUse']).toBeUndefined();
   });
 });

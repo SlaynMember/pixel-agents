@@ -37,8 +37,13 @@ import {
   watchLayoutFile,
   writeLayoutToFile,
 } from '../../server/src/layoutPersistence.js';
+import {
+  CLAUDE_HOOK_EVENTS_FULL,
+  CLAUDE_HOOK_EVENTS_MINIMAL,
+} from '../../server/src/providers/hook/claude/constants.js';
 import { claudeProvider, copyHookScript } from '../../server/src/providers/index.js';
 import { PixelAgentsServer } from '../../server/src/server.js';
+import { setHookToolEventsActive } from '../../server/src/transcriptParser.js';
 import {
   getProjectDirPath,
   launchNewTerminal,
@@ -51,6 +56,7 @@ import { assignAgentName } from './agentNames.js';
 import {
   CONFIG_KEY_AUTO_SHOW_PANEL,
   CONFIG_KEY_AUTO_SPAWN_AGENT,
+  CONFIG_KEY_HOOK_EVENT_MODE,
   GLOBAL_KEY_ALWAYS_SHOW_LABELS,
   GLOBAL_KEY_HOOKS_ENABLED,
   GLOBAL_KEY_HOOKS_INFO_SHOWN,
@@ -100,6 +106,10 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
   // Auto-spawn guard: ensures the startup spawn fires at most once per VS Code
   // session, even though webviewReady fires on every panel focus.
   private autoSpawnAttempted = false;
+
+  // Re-installs hooks + updates the transcriptParser gate flag when the user
+  // changes pixel-agents.hookEventMode.
+  private hookEventModeListener: vscode.Disposable | undefined;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -167,7 +177,43 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
     this.pendingBroadcasts.push(message);
   }
 
+  /** Reads pixel-agents.hookEventMode (default "minimal"). */
+  private getHookEventMode(): 'minimal' | 'full' {
+    return vscode.workspace
+      .getConfiguration()
+      .get<'minimal' | 'full'>(CONFIG_KEY_HOOK_EVENT_MODE, 'minimal');
+  }
+
+  /** Hook event set matching the current pixel-agents.hookEventMode. */
+  private getHookEvents(): readonly string[] {
+    return this.getHookEventMode() === 'full'
+      ? CLAUDE_HOOK_EVENTS_FULL
+      : CLAUDE_HOOK_EVENTS_MINIMAL;
+  }
+
+  /** (Re)install hooks for the currently configured event mode. */
+  private installHooksForCurrentMode(): void {
+    const serverConfig = this.pixelAgentsServer?.getConfig();
+    void claudeProvider.installHooks(
+      serverConfig ? `http://127.0.0.1:${serverConfig.port}` : '',
+      serverConfig?.token ?? '',
+      { events: this.getHookEvents() },
+    );
+    copyHookScript(this.context.extensionPath);
+  }
+
   private initServer(): void {
+    setHookToolEventsActive(this.getHookEventMode() === 'full');
+    this.hookEventModeListener = vscode.workspace.onDidChangeConfiguration((e) => {
+      if (!e.affectsConfiguration(CONFIG_KEY_HOOK_EVENT_MODE)) return;
+      const mode = this.getHookEventMode();
+      setHookToolEventsActive(mode === 'full');
+      if (this.runtime.hooksEnabled.current) {
+        this.installHooksForCurrentMode();
+      }
+      console.log(`[Pixel Agents] Hook event mode changed to "${mode}" — hooks re-installed`);
+    });
+
     this.pixelAgentsServer = new PixelAgentsServer();
     this.pixelAgentsServer.onHookEvent((providerId, event) => {
       this.runtime.handleHookEvent(providerId, event);
@@ -182,8 +228,7 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
         const hooksEnabled = this.adapter.getSetting<boolean>(GLOBAL_KEY_HOOKS_ENABLED, true);
         this.runtime.hooksEnabled.current = hooksEnabled;
         if (hooksEnabled) {
-          void claudeProvider.installHooks(`http://127.0.0.1:${config.port}`, config.token);
-          copyHookScript(this.context.extensionPath);
+          this.installHooksForCurrentMode();
         }
         console.log(`[Pixel Agents] Server: ready on port ${config.port}`);
       })
@@ -270,12 +315,7 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
         this.adapter.setSetting(GLOBAL_KEY_HOOKS_ENABLED, enabled);
         this.runtime.hooksEnabled.current = enabled;
         if (enabled) {
-          const serverConfig = this.pixelAgentsServer?.getConfig();
-          void claudeProvider.installHooks(
-            serverConfig ? `http://127.0.0.1:${serverConfig.port}` : '',
-            serverConfig?.token ?? '',
-          );
-          copyHookScript(this.context.extensionPath);
+          this.installHooksForCurrentMode();
           console.log('[Pixel Agents] Hooks enabled by user');
         } else {
           void claudeProvider.uninstallHooks();
@@ -806,6 +846,8 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
     this.runtime.dispose();
     this.layoutWatcher?.dispose();
     this.layoutWatcher = null;
+    this.hookEventModeListener?.dispose();
+    this.hookEventModeListener = undefined;
     this.store.dispose();
   }
 }
