@@ -23,6 +23,7 @@ export async function launchNewTab(
   store: AgentStateStore,
   runtime: AgentRuntime,
   folderPath?: string,
+  promptTemplate?: string,
 ): Promise<void> {
   const folders = vscode.workspace.workspaceFolders;
   const cwd = folderPath || folders?.[0]?.uri.fsPath || os.homedir();
@@ -80,7 +81,12 @@ export async function launchNewTab(
 
   runtime.addPendingSpawn(id, name, projectDir, cwd);
 
-  const firstPrompt = TAB_SPAWN_FIRST_PROMPT_TEMPLATE.replaceAll('{name}', name);
+  // Any template must keep the "({name})" prefix — it is the pending-spawn
+  // correlation key matched against the first UserPromptSubmit.
+  const firstPrompt = (promptTemplate ?? TAB_SPAWN_FIRST_PROMPT_TEMPLATE).replaceAll(
+    '{name}',
+    name,
+  );
 
   try {
     await vscode.commands.executeCommand(

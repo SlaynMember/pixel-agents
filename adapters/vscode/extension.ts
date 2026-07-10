@@ -2,11 +2,13 @@ import * as vscode from 'vscode';
 
 import { FileStateAdapter } from '../../server/src/fileStateAdapter.js';
 import {
+  COMMAND_DISPATCH_INTERN,
   COMMAND_EXPORT_DEFAULT_LAYOUT,
   COMMAND_SHOW_PANEL,
   CONFIG_KEY_AUTO_SHOW_PANEL,
   VIEW_ID,
 } from './constants.js';
+import { dispatchIntern } from './internDispatcher.js';
 import { migrateVsCodeState } from './migrateVsCodeState.js';
 import { PixelAgentsViewProvider } from './PixelAgentsViewProvider.js';
 
@@ -36,6 +38,14 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_EXPORT_DEFAULT_LAYOUT, () => {
       provider.exportDefaultLayout();
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_DISPATCH_INTERN, async () => {
+      // Reveal the office first so the intern's spawn is visible.
+      void vscode.commands.executeCommand(`${VIEW_ID}.focus`);
+      await dispatchIntern((promptTemplate) => provider.launchInternTab(promptTemplate));
     }),
   );
 

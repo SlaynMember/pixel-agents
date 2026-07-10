@@ -26,6 +26,7 @@ export const CONFIG_KEY_HOOK_EVENT_MODE = 'pixel-agents.hookEventMode';
 export const VIEW_ID = 'pixel-agents.panelView';
 export const COMMAND_SHOW_PANEL = 'pixel-agents.showPanel';
 export const COMMAND_EXPORT_DEFAULT_LAYOUT = 'pixel-agents.exportDefaultLayout';
+export const COMMAND_DISPATCH_INTERN = 'pixel-agents.dispatchIntern';
 
 // ── Claude Code Integration (tab launch mode) ────────────────
 /** Command exposed by the Claude Code extension to open a session as an editor tab. */
@@ -37,6 +38,12 @@ export const TAB_SPAWN_FIRST_PROMPT_TEMPLATE =
   '({name}) reporting for duty. Your agent name is {name}. When you or the system ' +
   'generate a title for this session, keep "({name}) " at the start of the title. ' +
   'Wait for my instructions.';
+/** First prompt for intern dispatch (chore task text is appended). Must start
+ *  with "({name})" — same correlation contract as TAB_SPAWN_FIRST_PROMPT_TEMPLATE. */
+export const INTERN_FIRST_PROMPT_PREFIX =
+  '({name}) intern reporting for duty. My name is {name}. Keep "({name}) " at the ' +
+  'start of any title generated for this session. Complete the following task now, ' +
+  'then end with a short report. Task: ';
 
 // ── Webview Broadcast Batching ────────────────────────────────
 /** High-frequency messages coalesced into a single `batch` postMessage instead
