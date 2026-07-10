@@ -3,6 +3,7 @@ import * as path from 'path';
 import type { AgentEvent, HookProvider } from '../../core/src/provider.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import { SESSION_END_GRACE_MS } from './constants.js';
+import { sameFsPath } from './pathKeys.js';
 import type { SessionRouter } from './sessionRouter.js';
 import { getInlineTeammates, hasInlineTeammates } from './teamUtils.js';
 import { cancelPermissionTimer, cancelWaitingTimer } from './timerManager.js';
@@ -116,9 +117,7 @@ export class HookEventHandler {
     if (this.watchAllSessionsRef?.current) return true;
     const projectDir = transcriptPath ? path.dirname(transcriptPath) : cwd;
     if (!projectDir) return false;
-    return [...this.agents.values()].some(
-      (a) => path.resolve(a.projectDir).toLowerCase() === path.resolve(projectDir).toLowerCase(),
-    );
+    return [...this.agents.values()].some((a) => sameFsPath(a.projectDir, projectDir));
   }
 
   /** Set callbacks for session lifecycle events (SessionStart/SessionEnd). */
@@ -181,13 +180,28 @@ export class HookEventHandler {
       }
     }
 
-    // --- UserPromptSubmit: instant "active" for known agents; pending-spawn ---
-    // correlation primary for unknown ones (tab-mode "(Name)" prompt-prefix match).
-    // MUST run before the confirmPending block below -- otherwise an unconsumed
-    // UserPromptSubmit for a real external session would be indistinguishable
-    // from one that just bound a pending spawn, and (if it also confirmed a
-    // pending-external record) could create a duplicate agent.
+    // --- UserPromptSubmit: pending-spawn correlation FIRST (tab-mode "(Name)" ---
+    // prompt-prefix match), THEN instant "active" for known agents. Prefix
+    // matching MUST run before the known-agent early-return: a Watch-All
+    // scanner race can register a usurper agent under the spawn's session_id
+    // before this prompt arrives, and bindPendingSpawn's self-heal (below)
+    // depends on getting first look at every prompt, not just ones from
+    // still-unknown sessions. It must ALSO run before the confirmPending
+    // block further down -- otherwise an unconsumed UserPromptSubmit for a
+    // real external session would be indistinguishable from one that just
+    // bound a pending spawn, and (if it also confirmed a pending-external
+    // record) could create a duplicate agent.
     if (normEvent.kind === 'promptSubmit') {
+      const bound = this.lifecycleCallbacks.onPromptSubmit?.(
+        event.session_id,
+        normEvent.prompt ?? '',
+        normEvent.transcriptPath,
+        normEvent.cwd,
+      );
+      if (bound) {
+        this.sessionRouter.discardPending(event.session_id);
+        return;
+      }
       const knownAgentId = this.sessionRouter.resolve(event.session_id);
       if (knownAgentId !== undefined) {
         const agent = this.agents.get(knownAgentId);
@@ -197,16 +211,6 @@ export class HookEventHandler {
           agent.isWaiting = false;
           this.agents.broadcast({ type: 'agentStatus', id: knownAgentId, status: 'active' });
         }
-        return;
-      }
-      const bound = this.lifecycleCallbacks.onPromptSubmit?.(
-        event.session_id,
-        normEvent.prompt ?? '',
-        normEvent.transcriptPath,
-        normEvent.cwd,
-      );
-      if (bound) {
-        this.sessionRouter.discardPending(event.session_id);
         return;
       }
       // Not consumed -- fall through so this event can still act as a
@@ -250,6 +254,20 @@ export class HookEventHandler {
             console.log(
               `[Pixel Agents] Hook: Agent ${id} - SessionStart(source=${source}) auto-discovered`,
             );
+          if (agent.isExternal) {
+            // The auto-discovered agent is scanner-adopted, not a real
+            // terminal/tab agent -- it may be a Watch-All usurper that beat a
+            // pending tab-mode spawn to this exact session (same race as the
+            // "unknown session" branch below). Record the candidate anyway so
+            // the spawn's early-bind timer can still reclaim it later
+            // (bindPendingSpawn removes the usurper); record-only, doesn't
+            // affect the agent just auto-discovered above.
+            this.lifecycleCallbacks.onSessionStartCandidate?.(
+              event.session_id,
+              transcriptPath,
+              cwd,
+            );
+          }
           return;
         }
       }
@@ -262,10 +280,7 @@ export class HookEventHandler {
             // then SessionStart. Match the agent that has pendingClear in same project dir.
             // Normalize paths for cross-platform comparison (separators + case-insensitive
             // for Windows where drive letter casing differs: c:\ vs C:\).
-            const isMatch =
-              agent.pendingClear &&
-              path.resolve(agent.projectDir).toLowerCase() ===
-                path.resolve(projectDir).toLowerCase();
+            const isMatch = agent.pendingClear && sameFsPath(agent.projectDir, projectDir);
             if (isMatch) {
               agent.pendingClear = false;
               console.log(

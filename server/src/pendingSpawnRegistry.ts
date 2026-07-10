@@ -1,4 +1,4 @@
-import * as path from 'path';
+import { sameFsPath } from './pathKeys.js';
 
 /** A tab-mode agent placeholder waiting for its real Claude Code session id to
  *  bind (via a matching UserPromptSubmit prompt, or the SessionStart candidate
@@ -10,11 +10,16 @@ export interface PendingSpawn {
   projectDir: string;
   cwd: string;
   createdAt: number;
-  /** Recorded by the SessionStart fallback matcher; only consumed at timeout,
-   *  and only if UserPromptSubmit never bound this spawn first. */
+  /** Recorded by the SessionStart fallback matcher (or a scanner offering the
+   *  spawn first claim); consumed at PENDING_SPAWN_CANDIDATE_BIND_DELAY_MS by
+   *  the early-bind timer below, or earlier if UserPromptSubmit binds first. */
   candidateSessionId?: string;
   candidateTranscriptPath?: string;
   timer: ReturnType<typeof setTimeout>;
+  /** One-shot timer that binds the spawn to its recorded candidate
+   *  PENDING_SPAWN_CANDIDATE_BIND_DELAY_MS after it was recorded, instead of
+   *  leaving the placeholder looking dead until the full spawn timeout. */
+  earlyBindTimer?: ReturnType<typeof setTimeout>;
 }
 
 /**
@@ -33,14 +38,21 @@ export class PendingSpawnRegistry {
     this.spawns.set(spawn.agentId, spawn);
   }
 
-  /** Clears the timeout and removes the record. Returns the removed spawn, if any. */
+  /** Clears both timers and removes the record. Returns the removed spawn, if any. */
   removeByAgentId(agentId: number): PendingSpawn | undefined {
     const spawn = this.spawns.get(agentId);
     if (spawn) {
       clearTimeout(spawn.timer);
+      if (spawn.earlyBindTimer) clearTimeout(spawn.earlyBindTimer);
       this.spawns.delete(agentId);
     }
     return spawn;
+  }
+
+  /** True when no spawns are pending -- lets callers skip prefix-matching work
+   *  (e.g. every UserPromptSubmit) on the (default) empty-registry fast path. */
+  isEmpty(): boolean {
+    return this.spawns.size === 0;
   }
 
   /** Find the pending spawn whose "(Name)" prefix matches the submitted prompt. */
@@ -54,23 +66,22 @@ export class PendingSpawnRegistry {
   }
 
   /**
-   * Find the sole pending spawn in a given project directory (case-insensitive,
-   * path.resolve-normalized). Returns undefined when zero or more than one
-   * spawn matches, so the SessionStart fallback never binds an ambiguous
-   * candidate (two simultaneous spawns in the same folder are left to the
-   * prompt-prefix matcher, which is unambiguous by construction).
+   * Find the sole pending spawn in a given project directory (normalized via
+   * normalizeFsPathKey -- see pathKeys.ts for why raw string comparison fails
+   * on Windows). Returns undefined when zero or more than one spawn matches,
+   * so the SessionStart fallback never binds an ambiguous candidate (two
+   * simultaneous spawns in the same folder are left to the prompt-prefix
+   * matcher, which is unambiguous by construction).
    */
   findSoleByProjectDir(dir: string): PendingSpawn | undefined {
-    const resolved = path.resolve(dir).toLowerCase();
-    const matches = [...this.spawns.values()].filter(
-      (s) => path.resolve(s.projectDir).toLowerCase() === resolved,
-    );
+    const matches = [...this.spawns.values()].filter((s) => sameFsPath(s.projectDir, dir));
     return matches.length === 1 ? matches[0] : undefined;
   }
 
   dispose(): void {
     for (const spawn of this.spawns.values()) {
       clearTimeout(spawn.timer);
+      if (spawn.earlyBindTimer) clearTimeout(spawn.earlyBindTimer);
     }
     this.spawns.clear();
   }

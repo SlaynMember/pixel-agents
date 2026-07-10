@@ -39,6 +39,7 @@ import {
   PROJECT_SCAN_INTERVAL_MS,
 } from './constants.js';
 import type { DismissalTracker } from './dismissalTracker.js';
+import { normalizeFsPathKey, sameFsPath } from './pathKeys.js';
 import { cancelPermissionTimer, cancelWaitingTimer, clearAgentActivity } from './timerManager.js';
 import { processTranscriptLine } from './transcriptParser.js';
 import type { AgentState } from './types.js';
@@ -137,11 +138,11 @@ export function startFileWatching(
         // The main scanner does NOT add non-adopted files to knownJsonlFiles,
         // so /clear files remain findable here.
         for (const file of dirFiles) {
-          if (deps.knownJsonlFiles.has(file)) continue;
+          if (deps.knownJsonlFiles.has(normalizeFsPathKey(file))) continue;
           if (dismissalTracker!.isDismissed(file)) continue;
           let tracked = false;
           for (const a of agents.values()) {
-            if (a.jsonlFile === file) {
+            if (sameFsPath(a.jsonlFile, file)) {
               tracked = true;
               break;
             }
@@ -160,7 +161,7 @@ export function startFileWatching(
             continue;
           }
           // Found a /clear file (has last-prompt) → claim it
-          deps.knownJsonlFiles.add(file);
+          deps.knownJsonlFiles.add(normalizeFsPathKey(file));
           console.log(
             `[Pixel Agents] Watcher: Agent ${agentId} - /clear detected, reassigning to ${path.basename(file)}`,
           );
@@ -242,9 +243,8 @@ const trackedProjectDirs = new Set<string>();
 export function isTrackedProjectDir(dir: string): boolean {
   if (trackedProjectDirs.has(dir)) return true;
   // Case-insensitive fallback for Windows (drive letter casing: c:\ vs C:\)
-  const resolved = path.resolve(dir).toLowerCase();
   for (const tracked of trackedProjectDirs) {
-    if (path.resolve(tracked).toLowerCase() === resolved) return true;
+    if (sameFsPath(tracked, dir)) return true;
   }
   return false;
 }
@@ -293,7 +293,7 @@ export function ensureProjectScan(
     for (const f of files) {
       // Seed all files and track mtime. External scanner detects --resume
       // by comparing current mtime to seeded mtime (changed = new writes).
-      knownJsonlFiles.add(f);
+      knownJsonlFiles.add(normalizeFsPathKey(f));
       try {
         const stat = fs.statSync(f);
         dismissalTracker!.seedMtime(f, stat.mtimeMs);
@@ -376,7 +376,7 @@ export function scanForNewJsonlFiles(
   }
 
   for (const file of files) {
-    if (knownJsonlFiles.has(file)) continue;
+    if (knownJsonlFiles.has(normalizeFsPathKey(file))) continue;
 
     // Main scanner does NOT do /clear detection. /clear is handled per-agent
     // in startFileWatching's poll loop (500ms, requires CURRENT terminal focus).
@@ -401,7 +401,7 @@ export function scanForNewJsonlFiles(
         }
       }
       if (!owned) {
-        knownJsonlFiles.add(file); // Claimed by terminal adoption
+        knownJsonlFiles.add(normalizeFsPathKey(file)); // Claimed by terminal adoption
         adoptTerminalForFile(
           activeTerminal,
           file,
@@ -433,7 +433,7 @@ export function scanForNewJsonlFiles(
             }
           }
           if (!owned) {
-            knownJsonlFiles.add(file); // Claimed by terminal adoption
+            knownJsonlFiles.add(normalizeFsPathKey(file)); // Claimed by terminal adoption
             adoptTerminalForFile(
               terminal,
               file,
@@ -602,7 +602,7 @@ export function scanForTeammateFiles(
     // Also check if any existing agent already tracks this file
     let alreadyTracked = false;
     for (const a of agents.values()) {
-      if (a.jsonlFile === file) {
+      if (sameFsPath(a.jsonlFile, file)) {
         alreadyTracked = true;
         break;
       }
@@ -812,21 +812,41 @@ export function adoptExternalSessionFromHook(
 
   persistAgents: () => void,
   onAgentCreated?: (agent: AgentState) => void,
+  /** Gives a pending "+ Agent" tab-mode spawn first claim on this session
+   *  before it's adopted as a brand-new external agent. Returns true when the
+   *  spawn claimed it -- caller must skip adoption entirely. See
+   *  AgentRuntime.offerCandidateToPendingSpawn. */
+  offerToPendingSpawn?: (projectDir: string, sessionId: string, transcriptPath?: string) => boolean,
 ): void {
   if (transcriptPath) {
     // File-based provider (Claude, Codex): adopt with JSONL file watching
     // Guard: don't adopt if file is already tracked by an agent
     for (const agent of agents.values()) {
-      if (agent.jsonlFile === transcriptPath) return;
+      if (sameFsPath(agent.jsonlFile, transcriptPath)) return;
     }
     // Don't check knownJsonlFiles here -- hooks confirmed this is a real session,
     // and seeded files at startup are in knownJsonlFiles but may become active later.
     if (dismissalTracker!.isDismissed(transcriptPath)) return;
     if (dismissalTracker!.isPermanentlyDismissed(transcriptPath)) return;
 
-    knownJsonlFiles.add(transcriptPath);
     const projectDir = path.dirname(transcriptPath);
-    const folderName = folderNameFromProjectDir(path.basename(projectDir));
+
+    if (offerToPendingSpawn?.(projectDir, sessionId, transcriptPath)) {
+      console.log(
+        `[Pixel Agents] Hook: pending spawn claimed session ${sessionId.slice(0, 8)}..., skipping adoption`,
+      );
+      return;
+    }
+
+    knownJsonlFiles.add(normalizeFsPathKey(transcriptPath));
+    // Prefer the real cwd folder name over the hashed project-dir name --
+    // folderNameFromProjectDir mangles multi-word folders ("Local Sites" ->
+    // "Sites") because the hash only keeps the last dash-separated segment.
+    // cwd is unavailable for scanner adoptions (they call adoptExternalSession
+    // directly), so this only applies to the hook-driven path.
+    const folderName = cwd
+      ? path.basename(cwd)
+      : folderNameFromProjectDir(path.basename(projectDir));
 
     adoptExternalSession(
       transcriptPath,
@@ -841,7 +861,7 @@ export function adoptExternalSessionFromHook(
       folderName,
     );
 
-    const adoptedAgent = [...agents.values()].find((a) => a.jsonlFile === transcriptPath);
+    const adoptedAgent = [...agents.values()].find((a) => sameFsPath(a.jsonlFile, transcriptPath));
     if (adoptedAgent && debug) {
       console.log(
         `[Pixel Agents] Hook: Agent ${adoptedAgent.id} - detected external session ${path.basename(transcriptPath)}${adoptedAgent.folderName ? ` (${adoptedAgent.folderName})` : ''}`,
@@ -1000,6 +1020,9 @@ export function startExternalSessionScanning(
   persistAgents: () => void,
   watchAllSessionsRef?: { current: boolean },
   hooksEnabledRef?: { current: boolean },
+  /** See adoptExternalSessionFromHook -- same pre-adoption pending-spawn claim,
+   *  threaded into both the workspace and global scanners. */
+  offerToPendingSpawn?: (projectDir: string, sessionId: string, transcriptPath?: string) => boolean,
 ): ReturnType<typeof setInterval> {
   return setInterval(() => {
     // When hooks are active, SessionStart handles workspace session detection.
@@ -1018,6 +1041,7 @@ export function startExternalSessionScanning(
           waitingTimers,
           permissionTimers,
           persistAgents,
+          offerToPendingSpawn,
         );
       }
     }
@@ -1032,6 +1056,7 @@ export function startExternalSessionScanning(
         waitingTimers,
         permissionTimers,
         persistAgents,
+        offerToPendingSpawn,
       );
     }
   }, EXTERNAL_SCAN_INTERVAL_MS);
@@ -1049,6 +1074,8 @@ export function scanExternalDir(
   permissionTimers: Map<number, ReturnType<typeof setTimeout>>,
 
   persistAgents: () => void,
+  /** See adoptExternalSessionFromHook -- same pre-adoption pending-spawn claim. */
+  offerToPendingSpawn?: (projectDir: string, sessionId: string, transcriptPath?: string) => boolean,
 ): void {
   let files: string[];
   try {
@@ -1092,7 +1119,7 @@ export function scanExternalDir(
         const stat = fs.statSync(file);
         if (stat.mtimeMs > seededMtime) {
           dismissalTracker!.clearSeededMtime(file);
-          knownJsonlFiles.delete(file);
+          knownJsonlFiles.delete(normalizeFsPathKey(file));
         }
       } catch {
         /* ignore */
@@ -1101,7 +1128,7 @@ export function scanExternalDir(
     }
 
     // Skip files already known (seeded or adopted).
-    if (knownJsonlFiles.has(file)) continue;
+    if (knownJsonlFiles.has(normalizeFsPathKey(file))) continue;
 
     // Skip files permanently dismissed by /clear (never re-adopted)
     if (dismissalTracker!.isPermanentlyDismissed(file)) continue;
@@ -1113,10 +1140,9 @@ export function scanExternalDir(
     // Check if already tracked by an agent (normalize paths for comparison).
     // This prevents the external scanner from adopting /clear files (already
     // reassigned to a terminal agent) while allowing untracked files through.
-    const normalizedFile = path.resolve(file);
     let tracked = false;
     for (const agent of agents.values()) {
-      if (path.resolve(agent.jsonlFile) === normalizedFile) {
+      if (sameFsPath(agent.jsonlFile, file)) {
         tracked = true;
         break;
       }
@@ -1151,7 +1177,19 @@ export function scanExternalDir(
       continue;
     }
 
-    knownJsonlFiles.add(file);
+    // Give a pending "+ Agent" tab-mode spawn in this project dir first claim
+    // on the session before adopting it as a brand-new external agent (fixes
+    // the Watch-All / workspace scanner usurping a tab placeholder's own
+    // session -- see AgentRuntime.offerCandidateToPendingSpawn).
+    const sessionId = path.basename(file, '.jsonl');
+    if (offerToPendingSpawn?.(projectDir, sessionId, file)) {
+      console.log(
+        `[Pixel Agents] Watcher: pending spawn claimed session ${sessionId.slice(0, 8)}..., skipping adoption of ${path.basename(file)}`,
+      );
+      continue;
+    }
+
+    knownJsonlFiles.add(normalizeFsPathKey(file));
     console.log(`[Pixel Agents] Watcher: detected external session ${path.basename(file)}`);
     adoptExternalSession(
       file,
@@ -1185,6 +1223,8 @@ function scanGlobalProjectDirs(
   permissionTimers: Map<number, ReturnType<typeof setTimeout>>,
 
   persistAgents: () => void,
+  /** See adoptExternalSessionFromHook -- same pre-adoption pending-spawn claim. */
+  offerToPendingSpawn?: (projectDir: string, sessionId: string, transcriptPath?: string) => boolean,
 ): void {
   const roots = hookProvider?.getAllSessionRoots?.() ?? [];
   if (roots.length === 0) return;
@@ -1203,8 +1243,11 @@ function scanGlobalProjectDirs(
 
   const now = Date.now();
   for (const dirPath of projectDirs) {
-    // Skip directories already tracked by workspace scanning
-    if (trackedProjectDirs.has(dirPath)) continue;
+    // Skip directories already tracked by workspace scanning. dirPath is
+    // readdir-derived (disk casing); trackedProjectDirs entries are
+    // cwd-derived (hook/config casing) -- isTrackedProjectDir does the
+    // case-insensitive Windows-safe comparison a raw Set.has() can't.
+    if (isTrackedProjectDir(dirPath)) continue;
 
     let files: string[];
     try {
@@ -1217,10 +1260,10 @@ function scanGlobalProjectDirs(
     }
 
     for (const file of files) {
-      if (knownJsonlFiles.has(file)) continue;
+      if (knownJsonlFiles.has(normalizeFsPathKey(file))) continue;
       let tracked = false;
       for (const agent of agents.values()) {
-        if (agent.jsonlFile === file) {
+        if (sameFsPath(agent.jsonlFile, file)) {
           tracked = true;
           break;
         }
@@ -1235,8 +1278,21 @@ function scanGlobalProjectDirs(
         continue;
       }
 
+      // Give a pending "+ Agent" tab-mode spawn in this project dir first
+      // claim on the session before adopting it as a brand-new external
+      // agent. This is THE fix for the Watch-All scanner race described in
+      // the background: without it, this global scanner's 3s tick can adopt
+      // a just-launched tab spawn's own session before hooks bind it.
+      const sessionId = path.basename(file, '.jsonl');
+      if (offerToPendingSpawn?.(dirPath, sessionId, file)) {
+        console.log(
+          `[Pixel Agents] Watcher: pending spawn claimed session ${sessionId.slice(0, 8)}..., skipping adoption of ${path.basename(file)}`,
+        );
+        continue;
+      }
+
       const folderName = folderNameFromProjectDir(path.basename(dirPath));
-      knownJsonlFiles.add(file);
+      knownJsonlFiles.add(normalizeFsPathKey(file));
       console.log(
         `[Pixel Agents] Watcher: detected global session ${path.basename(file)} (${folderName})`,
       );
@@ -1289,7 +1345,7 @@ export function startStaleExternalAgentCheck(
       const agent = agents.get(id);
       if (agent) {
         // Remove from knownJsonlFiles so the file can be re-adopted if it becomes active again
-        knownJsonlFiles.delete(agent.jsonlFile);
+        knownJsonlFiles.delete(normalizeFsPathKey(agent.jsonlFile));
       }
       console.log(`[Pixel Agents] Watcher: Agent ${id} - removing stale external agent`);
       agentRemovalCallback?.(id);

@@ -13,6 +13,7 @@ import {
   startFileWatching,
 } from '../../server/src/fileWatcher.js';
 import { loadLayout } from '../../server/src/layoutPersistence.js';
+import { normalizeFsPathKey } from '../../server/src/pathKeys.js';
 import { CLAUDE_TERMINAL_NAME_PREFIX } from '../../server/src/providers/hook/claude/constants.js';
 import { claudeProvider } from '../../server/src/providers/index.js';
 import { cancelPermissionTimer, cancelWaitingTimer } from '../../server/src/timerManager.js';
@@ -79,7 +80,7 @@ export async function launchNewTerminal(
 
   // Pre-register expected JSONL file so project scan won't treat it as a /clear file
   const expectedFile = path.join(projectDir, `${sessionId}.jsonl`);
-  knownJsonlFiles.add(expectedFile);
+  knownJsonlFiles.add(normalizeFsPathKey(expectedFile));
 
   // Create agent immediately (before JSONL file exists)
   const id = nextAgentIdRef.current++;
@@ -178,7 +179,9 @@ export async function launchNewTerminal(
         // Possible /resume: terminal started a different session than expected.
         // Check every tick for a file modified after the agent was created.
         try {
-          const trackedFiles = new Set([...agents.values()].map((a) => path.resolve(a.jsonlFile)));
+          const trackedFiles = new Set(
+            [...agents.values()].map((a) => normalizeFsPathKey(a.jsonlFile)),
+          );
           const candidates = fs
             .readdirSync(projectDir)
             .filter((f) => f.endsWith('.jsonl'))
@@ -186,7 +189,7 @@ export async function launchNewTerminal(
               const full = path.join(projectDir, f);
               return { file: full, mtime: fs.statSync(full).mtimeMs };
             })
-            .filter((c) => !trackedFiles.has(path.resolve(c.file)) && c.mtime > createdAt)
+            .filter((c) => !trackedFiles.has(normalizeFsPathKey(c.file)) && c.mtime > createdAt)
             .sort((a, b) => b.mtime - a.mtime); // newest first
 
           if (candidates.length > 0) {
@@ -310,7 +313,7 @@ export function restoreAgents(
     // Skip agents already in the map — prevents duplicate file watchers on re-entry
     // (webviewReady fires on every panel focus, re-calling restoreAgents each time)
     if (store.has(p.id)) {
-      knownJsonlFiles.add(p.jsonlFile);
+      knownJsonlFiles.add(normalizeFsPathKey(p.jsonlFile));
       continue;
     }
 
@@ -376,7 +379,7 @@ export function restoreAgents(
     };
 
     store.set(p.id, agent);
-    knownJsonlFiles.add(p.jsonlFile);
+    knownJsonlFiles.add(normalizeFsPathKey(p.jsonlFile));
     if (isExternal) {
       console.log(
         `[Pixel Agents] Terminal: Agent ${p.id} - restored external → ${path.basename(p.jsonlFile)}`,

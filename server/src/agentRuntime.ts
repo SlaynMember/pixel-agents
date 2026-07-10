@@ -14,7 +14,7 @@ import * as path from 'path';
 
 import type { HookProvider } from '../../core/src/provider.js';
 import type { AgentStateStore } from './agentStateStore.js';
-import { PENDING_SPAWN_TIMEOUT_MS } from './constants.js';
+import { PENDING_SPAWN_CANDIDATE_BIND_DELAY_MS, PENDING_SPAWN_TIMEOUT_MS } from './constants.js';
 import { DismissalTracker } from './dismissalTracker.js';
 import {
   adoptExternalSessionFromHook,
@@ -34,6 +34,7 @@ import {
 } from './fileWatcher.js';
 import type { HookEvent } from './hookEventHandler.js';
 import { HookEventHandler } from './hookEventHandler.js';
+import { normalizeFsPathKey, sameFsPath } from './pathKeys.js';
 import type { PendingSpawn } from './pendingSpawnRegistry.js';
 import { PendingSpawnRegistry } from './pendingSpawnRegistry.js';
 import { SessionRouter } from './sessionRouter.js';
@@ -117,11 +118,12 @@ export class AgentRuntime {
           this.permissionTimers,
           () => this.store.persist(),
           (agent) => this.registerAgent(agent.sessionId, agent.id),
+          (pd, sid, tp) => this.offerCandidateToPendingSpawn(pd, sid, tp),
         );
       },
       onSessionClear: (agentId, newSessionId, newTranscriptPath) => {
         if (newTranscriptPath) {
-          this.knownJsonlFiles.add(newTranscriptPath);
+          this.knownJsonlFiles.add(normalizeFsPathKey(newTranscriptPath));
           reassignAgentToFile(
             agentId,
             newTranscriptPath,
@@ -143,7 +145,7 @@ export class AgentRuntime {
       onSessionResume: (transcriptPath) => {
         this.dismissalTracker.clearDismissal(transcriptPath);
         this.dismissalTracker.clearSeededMtime(transcriptPath);
-        this.knownJsonlFiles.delete(transcriptPath);
+        this.knownJsonlFiles.delete(normalizeFsPathKey(transcriptPath));
       },
       onTeammateDetected: (parentAgentId, sessionId, _agentType) => {
         const parentAgent = this.store.get(parentAgentId);
@@ -181,6 +183,11 @@ export class AgentRuntime {
         }
       },
       onPromptSubmit: (sessionId, prompt) => {
+        // hookEventHandler now calls this for EVERY UserPromptSubmit (known
+        // agents included, see the promptSubmit branch there) so the prefix
+        // match can self-heal a usurped session. Skip the scan entirely on
+        // the common empty-registry path.
+        if (this.pendingSpawns.isEmpty()) return false;
         const spawn = this.pendingSpawns.findByPromptPrefix(prompt);
         if (!spawn) return false;
         return this.bindPendingSpawn(spawn, sessionId);
@@ -190,8 +197,7 @@ export class AgentRuntime {
         if (!dir) return;
         const spawn = this.pendingSpawns.findSoleByProjectDir(dir);
         if (!spawn || spawn.candidateSessionId) return;
-        spawn.candidateSessionId = sessionId;
-        spawn.candidateTranscriptPath = transcriptPath;
+        this.recordCandidate(spawn, sessionId, transcriptPath);
       },
     });
   }
@@ -228,13 +234,19 @@ export class AgentRuntime {
     if (!agent) return false;
 
     const jsonlFile = transcriptPath || path.join(spawn.projectDir, `${sessionId}.jsonl`);
-    const resolvedJsonl = path.resolve(jsonlFile).toLowerCase();
     for (const [otherId, otherAgent] of this.store) {
       if (otherId === spawn.agentId) continue;
       if (
         (otherAgent.sessionId && otherAgent.sessionId === sessionId) ||
-        (otherAgent.jsonlFile && path.resolve(otherAgent.jsonlFile).toLowerCase() === resolvedJsonl)
+        sameFsPath(otherAgent.jsonlFile, jsonlFile)
       ) {
+        // Self-heal for a Watch-All usurper that registered this session
+        // before we got here (see promptSubmit reordering in
+        // hookEventHandler.ts). removeAgent() alone doesn't unregister the
+        // session mapping -- every other removal call site pairs it with
+        // unregisterAgent explicitly, so do the same here rather than rely
+        // on the registerAgent() overwrite below to paper over it.
+        if (otherAgent.sessionId) this.unregisterAgent(otherAgent.sessionId);
         this.removeAgent(otherId);
       }
     }
@@ -243,7 +255,7 @@ export class AgentRuntime {
     agent.jsonlFile = jsonlFile;
     agent.hookDelivered = true;
     agent.fileOffset = 0;
-    this.knownJsonlFiles.add(jsonlFile);
+    this.knownJsonlFiles.add(normalizeFsPathKey(jsonlFile));
 
     this.registerAgent(sessionId, spawn.agentId);
     startFileWatching(
@@ -260,6 +272,54 @@ export class AgentRuntime {
     this.store.broadcast({ type: 'agentToolsClear', id: spawn.agentId });
     this.store.persist();
     return true;
+  }
+
+  /**
+   * Give a pending spawn first claim on a session a scanner is about to adopt
+   * as a brand-new external agent. Called by the external/global scanners and
+   * the hook-driven adopter BEFORE they create an agent, so a "+ Agent" tab
+   * placeholder always wins its own session instead of losing it to a
+   * same-tick Watch-All scan (see class doc / Background in the fix spec).
+   *
+   * Returns true when the caller should skip adoption entirely: either this
+   * call just claimed the sole pending spawn in projectDir, or that spawn was
+   * already claimed by this exact sessionId. Returns false when there's no
+   * sole pending spawn for the dir, or it's already claimed by a DIFFERENT
+   * session -- normal adoption proceeds.
+   */
+  offerCandidateToPendingSpawn(
+    projectDir: string,
+    sessionId: string,
+    transcriptPath?: string,
+  ): boolean {
+    const spawn = this.pendingSpawns.findSoleByProjectDir(projectDir);
+    if (!spawn) return false;
+    if (spawn.candidateSessionId === sessionId) return true;
+    if (spawn.candidateSessionId) return false;
+    this.recordCandidate(spawn, sessionId, transcriptPath);
+    return true;
+  }
+
+  /**
+   * Record a candidate session on a pending spawn and arm the early-bind
+   * timer. Shared by offerCandidateToPendingSpawn (pre-adoption scanner
+   * claim) and the onSessionStartCandidate lifecycle callback (SessionStart
+   * fallback record) so both paths get the same early-bind behavior instead
+   * of only binding at the full PENDING_SPAWN_TIMEOUT_MS timeout.
+   */
+  private recordCandidate(spawn: PendingSpawn, sessionId: string, transcriptPath?: string): void {
+    spawn.candidateSessionId = sessionId;
+    spawn.candidateTranscriptPath = transcriptPath;
+    if (spawn.earlyBindTimer) clearTimeout(spawn.earlyBindTimer);
+    spawn.earlyBindTimer = setTimeout(() => {
+      const stillPending = this.pendingSpawns.removeByAgentId(spawn.agentId);
+      if (!stillPending?.candidateSessionId) return;
+      this.bindPendingSpawn(
+        stillPending,
+        stillPending.candidateSessionId,
+        stillPending.candidateTranscriptPath,
+      );
+    }, PENDING_SPAWN_CANDIDATE_BIND_DELAY_MS);
   }
 
   /** Register adapter-specific lifecycle callbacks. */
@@ -387,6 +447,7 @@ export class AgentRuntime {
       () => this.store.persist(),
       this.watchAllSessions,
       this.hooksEnabled,
+      (pd, sid, tp) => this.offerCandidateToPendingSpawn(pd, sid, tp),
     );
   }
 
@@ -425,7 +486,7 @@ export class AgentRuntime {
         continue;
       }
       if (this.store.has(p.id)) {
-        this.knownJsonlFiles.add(p.jsonlFile);
+        this.knownJsonlFiles.add(normalizeFsPathKey(p.jsonlFile));
         if (p.id > maxId) maxId = p.id;
         continue;
       }
@@ -463,7 +524,7 @@ export class AgentRuntime {
       };
 
       this.store.set(p.id, agent);
-      this.knownJsonlFiles.add(p.jsonlFile);
+      this.knownJsonlFiles.add(normalizeFsPathKey(p.jsonlFile));
 
       try {
         const stat = fs.statSync(p.jsonlFile);

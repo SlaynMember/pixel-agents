@@ -2,7 +2,7 @@
   "name": "pixel-agents",
   "displayName": "Pixel Agents (Pattern3)",
   "description": "Pixel art office where your Claude Code agents come to life as animated characters",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "publisher": "pattern3",
   "repository": {
     "type": "git",
@@ -39,6 +39,10 @@
       {
         "command": "pixel-agents.exportDefaultLayout",
         "title": "Pixel Agents: Export Layout as Default"
+      },
+      {
+        "command": "pixel-agents.dispatchIntern",
+        "title": "Pixel Agents: Dispatch Intern"
       }
     ],
     "viewsContainers": {

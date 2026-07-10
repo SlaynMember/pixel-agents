@@ -18,6 +18,7 @@ import { AgentStateStore } from '../src/agentStateStore.js';
 import { DISMISSED_COOLDOWN_MS, EXTERNAL_ACTIVE_THRESHOLD_MS } from '../src/constants.js';
 import { DismissalTracker } from '../src/dismissalTracker.js';
 import { scanExternalDir, scanForNewJsonlFiles, setDismissalTracker } from '../src/fileWatcher.js';
+import { normalizeFsPathKey } from '../src/pathKeys.js';
 
 /**
  * Tests for the DismissalTracker integration with fileWatcher's scanner functions.
@@ -163,13 +164,17 @@ describe('fileWatcher dismissal state', () => {
       const file = writeJsonlFile('seeded.jsonl', '{"type":"assistant"}\n');
       const stat = fs.statSync(file);
       tracker.seedMtime(file, stat.mtimeMs);
-      knownJsonlFiles.add(file);
+      // knownJsonlFiles stores normalized keys (see pathKeys.ts) -- production
+      // code normalizes at every add/has/delete callsite, so tests poking the
+      // Set directly must too, or Windows casing (disk vs. cwd) makes these
+      // assertions lie.
+      knownJsonlFiles.add(normalizeFsPathKey(file));
 
       runExternalScan();
 
       // Untouched: still seeded, no adoption (already known).
       expect(tracker.hasSeededMtime(file)).toBe(true);
-      expect(knownJsonlFiles.has(file)).toBe(true);
+      expect(knownJsonlFiles.has(normalizeFsPathKey(file))).toBe(true);
       expect(agents.size).toBe(0);
     });
 
@@ -177,14 +182,14 @@ describe('fileWatcher dismissal state', () => {
       const file = writeJsonlFile('seeded.jsonl', '{"type":"assistant"}\n');
       // Seed with an OLD mtime so the file looks "modified since seeding".
       tracker.seedMtime(file, fs.statSync(file).mtimeMs - 60_000);
-      knownJsonlFiles.add(file);
+      knownJsonlFiles.add(normalizeFsPathKey(file));
 
       runExternalScan();
 
       // mtime-changed branch removes from BOTH tracking Maps and returns early
       // (no adoption on the same tick — lets agentManager detect /resume first).
       expect(tracker.hasSeededMtime(file)).toBe(false);
-      expect(knownJsonlFiles.has(file)).toBe(false);
+      expect(knownJsonlFiles.has(normalizeFsPathKey(file))).toBe(false);
       expect(agents.size).toBe(0);
     });
 
@@ -193,7 +198,7 @@ describe('fileWatcher dismissal state', () => {
       // detection, not produce a spurious external agent.
       const file = writeJsonlFile('seeded.jsonl', '{"type":"assistant"}\n');
       tracker.seedMtime(file, fs.statSync(file).mtimeMs - 30_000);
-      knownJsonlFiles.add(file);
+      knownJsonlFiles.add(normalizeFsPathKey(file));
 
       runExternalScan();
 
@@ -254,7 +259,7 @@ describe('fileWatcher dismissal state', () => {
 
     it('skips files already in knownJsonlFiles (seeded at startup)', () => {
       const file = writeJsonlFile('sess-1.jsonl', '{"type":"assistant"}\n');
-      knownJsonlFiles.add(file);
+      knownJsonlFiles.add(normalizeFsPathKey(file));
 
       runProjectScan();
 

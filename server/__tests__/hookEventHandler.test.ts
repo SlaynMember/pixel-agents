@@ -656,6 +656,53 @@ describe('HookEventHandler', () => {
     expect(agents.size).toBe(1);
   });
 
+  it('promptSubmit binds a pending spawn even when the session is ALREADY registered to a usurper agent (self-heal)', () => {
+    // Usurper: e.g. the Watch-All global scanner adopted this session as a
+    // brand-new external agent before the real "(Name)" prompt arrived.
+    const usurper = createTestAgent({ id: 2, sessionId: 'tab-sess', isExternal: true });
+    agents.set(2, usurper);
+    handler.registerAgent('tab-sess', 2);
+
+    // Placeholder: the "+ Agent" tab spawn still waiting to bind.
+    const placeholder = createTestAgent({ id: 1, sessionId: '' } as Partial<AgentState>);
+    agents.set(1, placeholder);
+
+    const onPromptSubmit = vi.fn((sessionId: string) => {
+      // Simulate AgentRuntime.bindPendingSpawn's dedupe/self-heal: remove the
+      // usurper and rebind the placeholder to the real session.
+      agents.delete(2);
+      placeholder.sessionId = sessionId;
+      handler.registerAgent(sessionId, 1);
+      return true;
+    });
+    handler.setLifecycleCallbacks({ onPromptSubmit });
+
+    // Before the fix, the "session already registered" early-return ran
+    // BEFORE prefix matching, so this event would only ever hit the
+    // known-agent "active broadcast" branch for the usurper (id 2) and the
+    // real placeholder would never bind. Prefix matching must now run first.
+    handler.handleEvent('claude', {
+      hook_event_name: 'UserPromptSubmit',
+      session_id: 'tab-sess',
+      prompt: '(Paul) reporting for duty.',
+    });
+
+    expect(onPromptSubmit).toHaveBeenCalledWith(
+      'tab-sess',
+      '(Paul) reporting for duty.',
+      undefined,
+      undefined,
+    );
+    // The known-agent "active broadcast" path must NOT fire for the usurper --
+    // prefix matching won the race and consumed the event via discardPending+return.
+    const activeMsg = mockWebview.messages.find(
+      (m) => m.type === 'agentStatus' && m.status === 'active',
+    );
+    expect(activeMsg).toBeUndefined();
+    expect(placeholder.sessionId).toBe('tab-sess');
+    expect(agents.has(2)).toBe(false);
+  });
+
   it('promptSubmit for an unknown session with no pending spawn still confirms a pending external', () => {
     const onExternalSessionDetected = vi.fn();
     handler.setLifecycleCallbacks({ onExternalSessionDetected }); // no onPromptSubmit registered

@@ -37,6 +37,7 @@ import {
   watchLayoutFile,
   writeLayoutToFile,
 } from '../../server/src/layoutPersistence.js';
+import { normalizeFsPathKey } from '../../server/src/pathKeys.js';
 import {
   CLAUDE_HOOK_EVENTS_FULL,
   CLAUDE_HOOK_EVENTS_MINIMAL,
@@ -437,7 +438,7 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
             if (agent) {
               this.runtime.dismissalTracker.dismiss(agent.jsonlFile);
               this.globalDismissedFiles.add(agent.jsonlFile);
-              this.runtime.knownJsonlFiles.delete(agent.jsonlFile);
+              this.runtime.knownJsonlFiles.delete(normalizeFsPathKey(agent.jsonlFile));
             }
             this.runtime.removeAgent(id);
           }
@@ -813,6 +814,11 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Export current saved layout as a versioned default-layout-{N}.json (dev utility) */
+  /** Launch a tab-mode agent with a custom first prompt (intern dispatch). */
+  async launchInternTab(promptTemplate: string): Promise<void> {
+    await launchNewTab(this.store, this.runtime, undefined, promptTemplate);
+  }
+
   exportDefaultLayout(): void {
     const layout = readLayoutFromFile();
     if (!layout) {

@@ -53,6 +53,13 @@ export const HOOK_EVENT_BUFFER_MS = 5_000;
  *  fallback) before despawning. Generous because the first prompt may only
  *  pre-fill the editor tab rather than auto-submit. */
 export const PENDING_SPAWN_TIMEOUT_MS = 120_000;
+/** How long a pending spawn waits after recording a SessionStart candidate
+ *  (from onSessionStartCandidate or offerCandidateToPendingSpawn) before
+ *  binding to it early, instead of leaving the placeholder looking dead
+ *  until PENDING_SPAWN_TIMEOUT_MS. Short enough to feel responsive, long
+ *  enough that a genuine "(Name)" prompt-prefix match (the primary,
+ *  unambiguous correlation path) still wins the race in the common case. */
+export const PENDING_SPAWN_CANDIDATE_BIND_DELAY_MS = 10_000;
 /** Grace period after SessionEnd(reason=clear/resume) before triggering onSessionEnd.
  *  /clear and /resume fire SessionEnd then SessionStart within ms. This timeout is a
  *  safety net: if SessionStart never arrives (e.g. the CLI crashes mid-transition),
