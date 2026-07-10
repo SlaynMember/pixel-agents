@@ -551,6 +551,7 @@ Use `console.log`/`error`/`warn` with prefixed context:
 
 ## Condensed Lessons
 
+- **Claude Code executes hook commands under a POSIX shell on every platform (Git Bash on Windows).** Never emit cmd.exe syntax in installed hook commands: `cmd /c if exist %USERPROFILE%...` silently dropped every hook event on Windows (MSYS mangles `/c`, `%USERPROFILE%` never expands, stdin JSON eaten by interactive cmd, exit 0). sh-style guard + forward-slash script paths everywhere. Broke all Windows hook delivery until 1.4.3.
 - `fs.watch` unreliable on Windows — always pair with polling backup.
 - Partial line buffering essential for append-only file reads (carry unterminated lines).
 - Delay `agentToolDone` 300 ms to prevent React batching from hiding brief active states.
