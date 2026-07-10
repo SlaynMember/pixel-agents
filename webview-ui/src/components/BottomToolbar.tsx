@@ -85,7 +85,7 @@ export function BottomToolbar({
   };
 
   return (
-    <div className="absolute bottom-10 left-10 z-20 flex items-center gap-4 pixel-panel p-4">
+    <div className="absolute bottom-5 left-5 z-20 flex items-center gap-2 pixel-panel-translucent p-4">
       {/* Hide + Agent in standalone browser mode (no terminal to interact with) */}
       {!isBrowserRuntime && (
         <div
@@ -96,6 +96,8 @@ export function BottomToolbar({
         >
           <Button
             variant="accent"
+            size="xs"
+            translucent
             onClick={handleAgentClick}
             className={
               isFolderPickerOpen || isBypassMenuOpen
@@ -127,6 +129,8 @@ export function BottomToolbar({
       )}
       <Button
         variant={isEditMode ? 'active' : 'default'}
+        size="xs"
+        translucent
         onClick={onToggleEditMode}
         title="Edit office layout"
       >
@@ -134,6 +138,8 @@ export function BottomToolbar({
       </Button>
       <Button
         variant={isSettingsOpen ? 'active' : 'default'}
+        size="xs"
+        translucent
         onClick={onToggleSettings}
         title="Settings"
       >

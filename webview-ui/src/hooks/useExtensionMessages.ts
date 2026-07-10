@@ -270,6 +270,78 @@ export function useExtensionMessages(
         >;
         const folderNames = (msg.folderNames || {}) as Record<number, string>;
         const names = (msg.names || {}) as Record<number, string>;
+        const incomingSet = new Set(incoming);
+
+        // Defensive sweep: this snapshot is authoritative (sent on
+        // webviewReady/reconnect). Any already-realized top-level character
+        // NOT in it is stale -- e.g. an agentClosed/agentRemoved lifecycle
+        // message that never arrived -- and gets torn down the same way the
+        // agentClosed handler does, so a lost message can't leave a ghost
+        // character/overlay behind indefinitely. Sourced from
+        // officeState.characters (always current), not the `agents` React
+        // state, which this long-lived handler closure would read stale.
+        const staleIds: number[] = [];
+        for (const ch of os.characters.values()) {
+          if (ch.isSubagent) continue;
+          if (!incomingSet.has(ch.id)) staleIds.push(ch.id);
+        }
+        if (staleIds.length > 0) {
+          const staleSet = new Set(staleIds);
+          setAgents((prev) => prev.filter((a) => !staleSet.has(a)));
+          setSelectedAgent((prev) => (prev !== null && staleSet.has(prev) ? null : prev));
+          setAgentTools((prev) => {
+            const next = { ...prev };
+            let changed = false;
+            for (const id of staleIds) {
+              if (id in next) {
+                delete next[id];
+                changed = true;
+              }
+            }
+            return changed ? next : prev;
+          });
+          setAgentStatuses((prev) => {
+            const next = { ...prev };
+            let changed = false;
+            for (const id of staleIds) {
+              if (id in next) {
+                delete next[id];
+                changed = true;
+              }
+            }
+            return changed ? next : prev;
+          });
+          setSubagentTools((prev) => {
+            const next = { ...prev };
+            let changed = false;
+            for (const id of staleIds) {
+              if (id in next) {
+                delete next[id];
+                changed = true;
+              }
+            }
+            return changed ? next : prev;
+          });
+          for (const id of staleIds) os.removeAllSubagents(id);
+          setSubagentCharacters((prev) => prev.filter((s) => !staleSet.has(s.parentAgentId)));
+          for (const id of staleIds) os.removeAgent(id);
+        }
+        // Extra guard: a sub-agent whose parent isn't in this snapshot is an
+        // orphan regardless of how it got that way -- clean it up too.
+        // Sourced from officeState.subagentMeta (always current) rather than
+        // the `subagentCharacters` React state, for the same stale-closure
+        // reason as above.
+        const orphanSubagents: Array<{ parentAgentId: number; parentToolId: string }> = [];
+        for (const subMeta of os.subagentMeta.values()) {
+          if (!incomingSet.has(subMeta.parentAgentId)) orphanSubagents.push(subMeta);
+        }
+        if (orphanSubagents.length > 0) {
+          for (const subMeta of orphanSubagents) {
+            os.removeSubagent(subMeta.parentAgentId, subMeta.parentToolId);
+          }
+          setSubagentCharacters((prev) => prev.filter((s) => incomingSet.has(s.parentAgentId)));
+        }
+
         // Buffer agents — they'll be added in layoutLoaded after seats are built
         for (const id of incoming) {
           const m = meta[id];

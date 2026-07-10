@@ -16,10 +16,11 @@ export function EditActionBar({ editor, editorState: es }: EditActionBarProps) {
   const redoDisabled = es.redoStack.length === 0;
 
   return (
-    <div className="absolute top-8 left-1/2 -translate-x-1/2 z-10 flex gap-4 items-center pixel-panel p-4">
+    <div className="absolute top-8 left-1/2 -translate-x-1/2 z-10 flex gap-4 items-center pixel-panel-translucent p-4">
       <Button
         variant={undoDisabled ? 'disabled' : 'default'}
         size="md"
+        translucent
         onClick={undoDisabled ? undefined : editor.handleUndo}
         title="Undo (Ctrl+Z)"
       >
@@ -28,18 +29,26 @@ export function EditActionBar({ editor, editorState: es }: EditActionBarProps) {
       <Button
         variant={redoDisabled ? 'disabled' : 'default'}
         size="md"
+        translucent
         onClick={redoDisabled ? undefined : editor.handleRedo}
         title="Redo (Ctrl+Y)"
       >
         Redo
       </Button>
-      <Button variant="default" size="md" onClick={editor.handleSave} title="Save layout">
+      <Button
+        variant="default"
+        size="md"
+        translucent
+        onClick={editor.handleSave}
+        title="Save layout"
+      >
         Save
       </Button>
       {!showResetConfirm ? (
         <Button
           variant="default"
           size="md"
+          translucent
           onClick={() => setShowResetConfirm(true)}
           title="Reset to last saved layout"
         >

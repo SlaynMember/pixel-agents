@@ -141,6 +141,11 @@ export const AUTO_ON_SIDE_DEPTH = 2;
 export const CHARACTER_HIT_HALF_WIDTH = 8;
 export const CHARACTER_HIT_HEIGHT = 24;
 export const TOOL_OVERLAY_VERTICAL_OFFSET = 32;
+/** Max characters shown on an overlay status/activity line before truncating
+ *  (only when the character is neither hovered nor selected). */
+export const OVERLAY_STATUS_MAX_CHARS = 26;
+/** Single-character ellipsis marker appended when a status line is truncated. */
+export const OVERLAY_COMPACT = '…';
 
 // ── Agent Teams ─────────────────────────────────────────────
 export const MAX_CONTEXT_TOKENS = 200_000;

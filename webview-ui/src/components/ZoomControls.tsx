@@ -58,7 +58,7 @@ export function ZoomControls({ zoom, onZoomChange }: ZoomControlsProps) {
       {/* Zoom level indicator at top-center */}
       {showLevel && (
         <div
-          className="absolute top-10 left-1/2 -translate-x-1/2 z-10 pixel-panel pb-4 px-16 text-lg select-none pointer-events-none"
+          className="absolute top-6 left-1/2 -translate-x-1/2 z-10 pixel-panel pb-4 px-16 text-lg select-none pointer-events-none"
           style={{
             opacity: fadeOut ? 0 : 1,
             transition: `opacity ${ZOOM_LEVEL_FADE_DURATION_SEC}s ease-out`,
@@ -69,12 +69,13 @@ export function ZoomControls({ zoom, onZoomChange }: ZoomControlsProps) {
       )}
 
       {/* Vertically stacked round buttons — top-left */}
-      <div className="absolute top-8 left-8 z-10 flex flex-col gap-4">
+      <div className="absolute top-4 left-4 z-10 flex flex-col gap-2">
         <Button
-          size="icon_lg"
+          size="icon_sm"
+          translucent
           onClick={() => onZoomChange(zoom + 1)}
           disabled={maxDisabled}
-          className="border-border! shadow-pixel disabled:hover:bg-btn-bg disabled:cursor-default disabled:opacity-(--btn-disabled-opacity)"
+          className="border-border! shadow-pixel disabled:hover:bg-btn-bg-translucent! disabled:cursor-default disabled:opacity-(--btn-disabled-opacity)"
           title="Zoom in (Ctrl+Scroll)"
         >
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
@@ -99,10 +100,11 @@ export function ZoomControls({ zoom, onZoomChange }: ZoomControlsProps) {
           </svg>
         </Button>
         <Button
-          size="icon_lg"
+          size="icon_sm"
+          translucent
           onClick={() => onZoomChange(zoom - 1)}
           disabled={minDisabled}
-          className="border-border! shadow-pixel disabled:hover:bg-btn-bg disabled:cursor-default disabled:opacity-(--btn-disabled-opacity)"
+          className="border-border! shadow-pixel disabled:hover:bg-btn-bg-translucent! disabled:cursor-default disabled:opacity-(--btn-disabled-opacity)"
           title="Zoom out (Ctrl+Scroll)"
         >
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none">

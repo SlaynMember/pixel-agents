@@ -26,6 +26,14 @@
   --color-btn-hover: rgb(78, 75, 104);
   --color-active-bg: rgb(44, 43, 109);
 
+  /* Translucent chrome — controls that float over the office canvas (toolbars,
+     zoom buttons, edit action bar) so tiles/characters stay visible underneath.
+     Goes opaque on hover/focus so labels stay readable while interacting. */
+  --color-bg-translucent: rgba(30, 30, 46, 0.68);
+  --color-btn-bg-translucent: rgba(53, 52, 69, 0.68);
+  --color-active-bg-translucent: rgba(44, 43, 109, 0.68);
+  --color-accent-translucent: rgba(96, 48, 255, 0.68);
+
   /* Semantic */
   --color-reset-text: #ecc;
   --color-danger: #d14249;
@@ -76,6 +84,10 @@
   --color-btn-hover: var(--color-btn-hover);
   --color-active-bg: var(--color-active-bg);
   --color-accent-bright: var(--color-accent-bright);
+  --color-bg-translucent: var(--color-bg-translucent);
+  --color-btn-bg-translucent: var(--color-btn-bg-translucent);
+  --color-active-bg-translucent: var(--color-active-bg-translucent);
+  --color-accent-translucent: var(--color-accent-translucent);
   --color-reset-text: var(--color-reset-text);
   --color-danger: var(--color-danger);
   --color-warning: var(--color-warning);
@@ -106,6 +118,18 @@
     @apply bg-bg border-2 border-border rounded-none shadow-pixel;
   }
 
+  /* Translucent panel — for chrome floating directly over the office canvas
+     (BottomToolbar, EditActionBar, version notice). Opaque on hover/focus so
+     content stays readable while interacting. Border/shadow stay as-is. */
+  .pixel-panel-translucent {
+    @apply border-2 border-border rounded-none shadow-pixel;
+    background: var(--color-bg-translucent);
+  }
+  .pixel-panel-translucent:hover,
+  .pixel-panel-translucent:focus-within {
+    background: var(--color-bg);
+  }
+
   /* Horizontal carousel for editor items */
   .carousel {
     @apply flex gap-8 overflow-x-auto flex-nowrap pb-2;
@@ -124,5 +148,12 @@
   }
   50% {
     opacity: 0.3;
+  }
+}
+
+/* Sidebar panel can go narrower than the version badge comfortably fits. */
+@media (max-width: 360px) {
+  .version-badge {
+    display: none;
   }
 }

@@ -11,6 +11,8 @@ import {
   FUEL_GAUGE_HEIGHT_PX,
   FUEL_GAUGE_WIDTH_PX,
   MAX_CONTEXT_TOKENS,
+  OVERLAY_COMPACT,
+  OVERLAY_STATUS_MAX_CHARS,
   TEAM_LEAD_COLOR,
   TEAM_ROLE_COLOR,
   TOKEN_CRITICAL_THRESHOLD,
@@ -76,6 +78,17 @@ function getActivityText(
   }
 
   return 'Idle';
+}
+
+/**
+ * Truncate an overlay status/label line to OVERLAY_STATUS_MAX_CHARS with a
+ * trailing ellipsis, unless the character is hovered or selected (full text).
+ * Keeps the ambient "always show labels" mode glanceable without letting long
+ * tool statuses or subagent task text cover the office.
+ */
+function truncateOverlayText(text: string, showFull: boolean): string {
+  if (showFull || text.length <= OVERLAY_STATUS_MAX_CHARS) return text;
+  return text.slice(0, OVERLAY_STATUS_MAX_CHARS - 1) + OVERLAY_COMPACT;
 }
 
 function getFuelColor(ratio: number): string {
@@ -148,6 +161,7 @@ export function ToolOverlay({
     let rafId = 0;
     const tick = () => {
       const containerEl = containerRef.current;
+      let foundOrphan = false;
       if (containerEl && elRefs.current.size > 0) {
         const rect = containerEl.getBoundingClientRect();
         const dpr = window.devicePixelRatio || 1;
@@ -161,7 +175,18 @@ export function ToolOverlay({
 
         for (const [id, node] of elRefs.current) {
           const ch = officeState.characters.get(id);
-          if (!ch) continue;
+          if (!ch) {
+            // Character no longer exists (removed/despawned) but React hasn't
+            // committed the unmount yet this frame — hide immediately so it
+            // can never linger as a ghost, and stop tracking it. Never detach
+            // the node ourselves (React still owns it; a manual .remove()
+            // here would make React's own later removeChild throw when it
+            // finally reconciles this id away).
+            node.style.display = 'none';
+            elRefs.current.delete(id);
+            foundOrphan = true;
+            continue;
+          }
           const { screenX, screenY } = computeOverlayPos(
             ch,
             deviceOffsetX,
@@ -176,7 +201,7 @@ export function ToolOverlay({
       }
 
       const signature = buildStructuralSignature(officeState);
-      if (signature !== prevSignatureRef.current) {
+      if (foundOrphan || signature !== prevSignatureRef.current) {
         prevSignatureRef.current = signature;
         setTick((n) => n + 1);
       }
@@ -248,6 +273,11 @@ export function ToolOverlay({
           );
         }
 
+        // Full text (name + activity + folder) only while inspecting a single
+        // character; everyone else stays compact so the office doesn't drown
+        // in overlapping labels while agents work.
+        const showFull = isSelected || isHovered;
+
         // Get activity text
         const hasWaitingBubble = ch.bubbleType === 'waiting';
         const subHasPermission = isSub && ch.bubbleType === 'permission';
@@ -272,6 +302,7 @@ export function ToolOverlay({
             ch.waitingAwaitingInput ?? false,
           );
         }
+        activityText = truncateOverlayText(activityText, showFull);
 
         // Determine dot color
         const tools = agentTools[id];
@@ -292,7 +323,10 @@ export function ToolOverlay({
         const teamRoleLabel = ch.isTeamLead ? 'LEAD' : ch.agentName || null;
         const totalTokens = ch.inputTokens + ch.outputTokens;
         const tokenRatio = totalTokens / MAX_CONTEXT_TOKENS;
-        const hasExtraLines = !!(ch.folderName || teamRoleLabel || ch.name);
+        // Folder line only renders when showFull (see below), so it only
+        // counts toward the extra-line offset in that case.
+        const showFolder = !!ch.folderName && showFull;
+        const hasExtraLines = !!(showFolder || teamRoleLabel || ch.name);
         const topOffset = hasExtraLines ? PANEL_TOP_OFFSET_EXTRA_LINES : PANEL_TOP_OFFSET_NORMAL;
 
         return (
@@ -311,7 +345,7 @@ export function ToolOverlay({
             data-testid="agent-overlay"
             data-agent-id={id}
           >
-            <div className="flex items-center border-border px-8 pt-2 pb-4 gap-5 pixel-panel whitespace-nowrap max-w-2xs">
+            <div className="flex items-center border-border px-6 pt-1 pb-3 gap-4 pixel-panel whitespace-nowrap max-w-2xs">
               {dotColor && (
                 <span
                   className={`w-6 h-6 rounded-full shrink-0 ${isActive && !hasPermission && !hasWaiting ? 'pixel-pulse' : ''}`}
@@ -323,7 +357,7 @@ export function ToolOverlay({
                   <span
                     className="overflow-hidden text-ellipsis block leading-none"
                     style={{
-                      fontSize: '18px',
+                      fontSize: '16px',
                       color: ch.isTeamLead ? TEAM_LEAD_COLOR : TEAM_ROLE_COLOR,
                       fontWeight: ch.isTeamLead ? 'bold' : undefined,
                     }}
@@ -335,7 +369,7 @@ export function ToolOverlay({
                   <span
                     className="overflow-hidden text-ellipsis block leading-none"
                     style={{
-                      fontSize: '18px',
+                      fontSize: '16px',
                       fontWeight: 'bold',
                       color: TEAM_ROLE_COLOR,
                     }}
@@ -346,13 +380,13 @@ export function ToolOverlay({
                 <span
                   className="overflow-hidden text-ellipsis block leading-none"
                   style={{
-                    fontSize: isSub ? '20px' : '22px',
+                    fontSize: isSub ? '18px' : '20px',
                     fontStyle: isSub ? 'italic' : undefined,
                   }}
                 >
                   {activityText}
                 </span>
-                {ch.folderName && (
+                {showFolder && (
                   <span className="text-2xs leading-none overflow-hidden text-ellipsis block">
                     {ch.folderName}
                   </span>
