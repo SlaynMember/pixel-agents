@@ -2,7 +2,7 @@
   "name": "pixel-agents",
   "displayName": "Pixel Agents (Pattern3)",
   "description": "Pixel art office where your Claude Code agents come to life as animated characters",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "publisher": "pattern3",
   "repository": {
     "type": "git",
@@ -78,7 +78,10 @@
         },
         "pixel-agents.launchMode": {
           "type": "string",
-          "enum": ["tab", "terminal"],
+          "enum": [
+            "tab",
+            "terminal"
+          ],
           "default": "tab",
           "description": "How new agents are launched: 'tab' opens Claude Code in an editor tab, 'terminal' launches it in a VS Code terminal."
         },
@@ -87,12 +90,24 @@
           "items": {
             "type": "string"
           },
-          "default": ["Paul", "Dot", "Mango", "Pixel", "Beans", "Juno", "Ivy", "Clyde"],
+          "default": [
+            "Paul",
+            "Dot",
+            "Mango",
+            "Pixel",
+            "Beans",
+            "Juno",
+            "Ivy",
+            "Clyde"
+          ],
           "description": "Names assigned to new agents, in order, before repeating with a numeric suffix."
         },
         "pixel-agents.hookEventMode": {
           "type": "string",
-          "enum": ["minimal", "full"],
+          "enum": [
+            "minimal",
+            "full"
+          ],
           "default": "minimal",
           "description": "Which Claude Code hook events to install. 'minimal' installs only lifecycle hooks (zero per-tool-call overhead; tool activity comes from transcript polling). 'full' installs all 14 events."
         }

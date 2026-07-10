@@ -366,8 +366,6 @@ export class HookEventHandler {
       // Buffer if: pending external session, already buffering for this session,
       // OR agents exist that haven't been registered yet (internal agent race:
       // hook event arrives before registerAgent is called after launchNewTerminal).
-      // Silently drop events for sessions we have no record of
-      // (e.g. other projects with Watch All OFF).
       const isPending = this.sessionRouter.hasPending(event.session_id);
       const hasBuffered = this.sessionRouter.hasBuffered(event.session_id);
       const hasUnregisteredAgents = [...this.agents.values()].some(
@@ -379,6 +377,31 @@ export class HookEventHandler {
             `[Pixel Agents] Hook: ${eventName} - unknown session ${event.session_id.slice(0, 8)}..., buffering`,
           );
         this.sessionRouter.bufferEvent(_providerId, event);
+        return;
+      }
+      // Orphaned session: started before this server booted, so its SessionStart
+      // was never delivered and no pending record exists. Store it as pending
+      // (exactly what SessionStart would have done) and buffer this event; the
+      // next event confirms the pending record and adopts the session, then the
+      // buffered event replays on registration. sessionEnd is excluded (a dying
+      // session must not become pending), and the isTrackedSession gate keeps
+      // other projects invisible when Watch All Sessions is OFF.
+      if (normEvent.kind !== 'sessionEnd') {
+        const transcriptPath =
+          typeof event.transcript_path === 'string' ? event.transcript_path : undefined;
+        const cwd = typeof event.cwd === 'string' ? event.cwd : undefined;
+        if ((transcriptPath || cwd) && this.isTrackedSession(transcriptPath, cwd)) {
+          if (debug)
+            console.log(
+              `[Pixel Agents] Hook: ${eventName} - orphaned session ${event.session_id.slice(0, 8)}..., storing as pending external`,
+            );
+          this.sessionRouter.storePending(event.session_id, {
+            sessionId: event.session_id,
+            transcriptPath,
+            cwd: cwd ?? '',
+          });
+          this.sessionRouter.bufferEvent(_providerId, event);
+        }
       }
       return;
     }

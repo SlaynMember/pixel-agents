@@ -582,6 +582,105 @@ describe('HookEventHandler', () => {
     expect(agent?.isWaiting).toBe(true);
   });
 
+  // ── Orphaned sessions (SessionStart predates the server) ─────
+
+  it('orphaned session (missed SessionStart) is adopted after a follow-up event', () => {
+    const localHandler = new HookEventHandler(
+      agents,
+      waitingTimers,
+      permissionTimers,
+      claudeProvider,
+      new SessionRouter(),
+      { current: true }, // Watch All Sessions ON
+    );
+    const onExternalSessionDetected = vi.fn((sessionId: string) => {
+      const agent = createTestAgent({
+        id: 5,
+        sessionId,
+        projectDir: '/projects/orphan',
+      } as Partial<AgentState>);
+      agents.set(5, agent);
+      localHandler.registerAgent(sessionId, 5);
+    });
+    localHandler.setLifecycleCallbacks({ onExternalSessionDetected });
+
+    // First event from a session whose SessionStart was never delivered
+    // (fired before this server booted): stored as pending + buffered
+    // instead of silently dropped.
+    localHandler.handleEvent('claude', {
+      hook_event_name: 'UserPromptSubmit',
+      session_id: 'orphan-sess',
+      prompt: 'fix the modal',
+      transcript_path: '/projects/orphan/orphan-sess.jsonl',
+      cwd: '/projects/orphan',
+    });
+    expect(onExternalSessionDetected).not.toHaveBeenCalled();
+
+    // Next event confirms the pending record and adopts the session.
+    localHandler.handleEvent('claude', {
+      hook_event_name: 'Stop',
+      session_id: 'orphan-sess',
+    });
+
+    expect(onExternalSessionDetected).toHaveBeenCalledTimes(1);
+    expect(onExternalSessionDetected).toHaveBeenCalledWith(
+      'orphan-sess',
+      '/projects/orphan/orphan-sess.jsonl',
+      '/projects/orphan',
+    );
+    // Stop was re-processed after adoption
+    expect(agents.get(5)?.isWaiting).toBe(true);
+  });
+
+  it('orphaned session in an untracked project stays dropped when Watch All is OFF', () => {
+    const onExternalSessionDetected = vi.fn();
+    // default handler: no watchAllSessionsRef, no agents in /other/project
+    handler.setLifecycleCallbacks({ onExternalSessionDetected });
+
+    handler.handleEvent('claude', {
+      hook_event_name: 'UserPromptSubmit',
+      session_id: 'foreign-sess',
+      prompt: 'hi',
+      transcript_path: '/other/project/foreign-sess.jsonl',
+      cwd: '/other/project',
+    });
+    handler.handleEvent('claude', {
+      hook_event_name: 'Stop',
+      session_id: 'foreign-sess',
+    });
+
+    expect(onExternalSessionDetected).not.toHaveBeenCalled();
+  });
+
+  it('sessionEnd from an unknown session never creates a pending external', () => {
+    const localHandler = new HookEventHandler(
+      agents,
+      waitingTimers,
+      permissionTimers,
+      claudeProvider,
+      new SessionRouter(),
+      { current: true },
+    );
+    const onExternalSessionDetected = vi.fn();
+    localHandler.setLifecycleCallbacks({ onExternalSessionDetected });
+
+    localHandler.handleEvent('claude', {
+      hook_event_name: 'SessionEnd',
+      session_id: 'dead-sess',
+      reason: 'exit',
+      transcript_path: '/projects/x/dead-sess.jsonl',
+      cwd: '/projects/x',
+    });
+    // If SessionEnd had (wrongly) stored a pending record, this follow-up
+    // event would confirm it and adopt the dead session.
+    localHandler.handleEvent('claude', {
+      hook_event_name: 'Stop',
+      session_id: 'dead-sess',
+    });
+
+    expect(onExternalSessionDetected).not.toHaveBeenCalled();
+  });
+
   // ── UserPromptSubmit / pending-spawn correlation ─────────────
 
   it('promptSubmit for a known session broadcasts active', () => {
