@@ -82,19 +82,23 @@ function isOurHookEntry(entry: ClaudeHookEntry): boolean {
  * Build the shell command that Claude Code will execute for each hook event.
  * Wrapped with an existence check on ~/.pixel-agents/server.json (WI-7) so no
  * node process spawns when the extension panel/server isn't running. The
- * %USERPROFILE%/$HOME reference is a literal env var evaluated by the shell at
- * hook-run time (the command string is baked into ~/.claude/settings.json), not
- * resolved here. The false-branch/`|| true` keeps exit code 0 so Claude Code
- * never surfaces a hook warning when the file is missing. The ownership marker
- * (isOurHookEntry, claude-hook.js substring) still matches the wrapped command,
- * so idempotent replace/uninstall is unaffected.
+ * $HOME reference is a literal env var evaluated by the shell at hook-run time
+ * (the command string is baked into ~/.claude/settings.json), not resolved
+ * here. The `|| true` keeps exit code 0 so Claude Code never surfaces a hook
+ * warning when the file is missing. The ownership marker (isOurHookEntry,
+ * claude-hook.js substring) still matches the wrapped command, so idempotent
+ * replace/uninstall is unaffected.
+ *
+ * The sh-style command is used on EVERY platform, including Windows: Claude
+ * Code executes hook commands under a POSIX shell (Git Bash on Windows), so a
+ * cmd.exe-style wrapper ("cmd /c if exist %USERPROFILE%...") silently drops
+ * every event there -- MSYS mangles `/c`, `%USERPROFILE%` never expands, and
+ * the event JSON on stdin gets consumed by an interactive cmd instead of the
+ * hook script, all with exit code 0. The script path uses forward slashes,
+ * which both bash and node accept on Windows.
  */
 function makeHookCommand(): string {
-  const scriptPath = getHookScriptPath();
-  if (process.platform === 'win32') {
-    const checkPath = `%USERPROFILE%\\${SERVER_JSON_RELATIVE_PATH.replace(/\//g, '\\')}`;
-    return `cmd /c if exist "${checkPath}" node "${scriptPath}"`;
-  }
+  const scriptPath = getHookScriptPath().replace(/\\/g, '/');
   const checkPath = `$HOME/${SERVER_JSON_RELATIVE_PATH}`;
   return `[ -f "${checkPath}" ] && node "${scriptPath}" || true`;
 }

@@ -140,13 +140,13 @@ describe('claudeHookInstaller', () => {
     const command = hooks['Stop'][0].hooks[0].command;
     expect(command).toContain('claude-hook.js');
     expect(command).toContain('server.json');
-    if (process.platform === 'win32') {
-      expect(command).toContain('cmd /c if exist');
-      expect(command).toContain('%USERPROFILE%\\.pixel-agents\\server.json');
-    } else {
-      expect(command.startsWith('[ -f "$HOME/.pixel-agents/server.json" ]')).toBe(true);
-      expect(command.endsWith('|| true')).toBe(true);
-    }
+    // sh-style on every platform: Claude Code runs hook commands under a
+    // POSIX shell (Git Bash on Windows), where cmd.exe syntax silently
+    // drops the event. Script path must use forward slashes only.
+    expect(command.startsWith('[ -f "$HOME/.pixel-agents/server.json" ]')).toBe(true);
+    expect(command.endsWith('|| true')).toBe(true);
+    expect(command).not.toContain('cmd /c');
+    expect(command).not.toContain('\\');
   });
 
   // 12. installHooks(MINIMAL) installs only the minimal event set
