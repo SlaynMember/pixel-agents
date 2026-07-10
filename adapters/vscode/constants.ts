@@ -38,12 +38,18 @@ export const TAB_SPAWN_FIRST_PROMPT_TEMPLATE =
   '({name}) reporting for duty. Your agent name is {name}. When you or the system ' +
   'generate a title for this session, keep "({name}) " at the start of the title. ' +
   'Wait for my instructions.';
-/** First prompt for intern dispatch (chore task text is appended). Must start
- *  with "({name})" — same correlation contract as TAB_SPAWN_FIRST_PROMPT_TEMPLATE. */
-export const INTERN_FIRST_PROMPT_PREFIX =
+/** First prompt for intern dispatch. Must start with "({name})" — same
+ *  correlation contract as TAB_SPAWN_FIRST_PROMPT_TEMPLATE. */
+export const INTERN_RESEARCH_PROMPT =
   '({name}) intern reporting for duty. My name is {name}. Keep "({name}) " at the ' +
-  'start of any title generated for this session. Complete the following task now, ' +
-  'then end with a short report. Task: ';
+  'start of any title generated for this session. I am a research intern: cheap and ' +
+  'read-only. No code edits, no deploys, nothing that touches prod. First task, do it ' +
+  'now: skim the Obsidian context injected at session start; if none was injected, ' +
+  'read the 3 most recent daily notes under ~/Documents/Obsidian Vault/Daily/ and the ' +
+  'project notes they mention (targeted reads only, no repo spelunking). Then propose ' +
+  '3-5 low-token research tasks I could run right now based on that context (web ' +
+  'lookups, vendor-doc checks, short summaries, digging on open questions), as a ' +
+  'numbered list with one line each on why it helps. Then stop and wait for Will to pick.';
 
 // ── Webview Broadcast Batching ────────────────────────────────
 /** High-frequency messages coalesced into a single `batch` postMessage instead

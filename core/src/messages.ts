@@ -55,7 +55,8 @@ export type ClientMessage =
   | OpenSessionsFolder
   | AddExternalAssetDirectory
   | RemoveExternalAssetDirectory
-  | RequestDiagnostics;
+  | RequestDiagnostics
+  | DispatchIntern;
 
 export interface ProviderCapabilities {
   type: 'providerCapabilities';
@@ -407,4 +408,8 @@ export interface RemoveExternalAssetDirectory {
 
 export interface RequestDiagnostics {
   type: 'requestDiagnostics';
+}
+
+export interface DispatchIntern {
+  type: 'dispatchIntern';
 }

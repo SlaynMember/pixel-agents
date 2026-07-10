@@ -137,6 +137,7 @@ components:
         - $ref: '#/components/schemas/AddExternalAssetDirectory'
         - $ref: '#/components/schemas/RemoveExternalAssetDirectory'
         - $ref: '#/components/schemas/RequestDiagnostics'
+        - $ref: '#/components/schemas/DispatchIntern'
       discriminator: type
 
     # ── Server message variants ────────────────────────────────────
@@ -878,6 +879,15 @@ components:
       properties:
         type:
           const: requestDiagnostics
+
+    DispatchIntern:
+      description: Launch a research-intern tab.
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          const: dispatchIntern
 
     # ── Supporting schemas ─────────────────────────────────────────
 

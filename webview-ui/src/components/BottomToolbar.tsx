@@ -127,6 +127,18 @@ export function BottomToolbar({
           </Dropdown>
         </div>
       )}
+      {/* Hide Intern in standalone browser mode (no terminal to interact with) */}
+      {!isBrowserRuntime && (
+        <Button
+          variant="default"
+          size="xs"
+          translucent
+          onClick={() => transport.send({ type: 'dispatchIntern' })}
+          title="Dispatch a research intern (proposes low-token tasks from recent Obsidian notes)"
+        >
+          Intern
+        </Button>
+      )}
       <Button
         variant={isEditMode ? 'active' : 'default'}
         size="xs"

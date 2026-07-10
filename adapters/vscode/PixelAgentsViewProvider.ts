@@ -68,6 +68,7 @@ import {
   GLOBAL_KEY_LAST_SEEN_VERSION,
   GLOBAL_KEY_SOUND_ENABLED,
   GLOBAL_KEY_WATCH_ALL_SESSIONS,
+  INTERN_RESEARCH_PROMPT,
   LAYOUT_REVISION_KEY,
 } from './constants.js';
 import { launchNewTab } from './tabLauncher.js';
@@ -779,6 +780,8 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
         } catch {
           vscode.window.showErrorMessage('Pixel Agents: Failed to read or parse layout file.');
         }
+      } else if (message.type === 'dispatchIntern') {
+        void this.launchInternTab();
       }
     });
 
@@ -814,9 +817,9 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Export current saved layout as a versioned default-layout-{N}.json (dev utility) */
-  /** Launch a tab-mode agent with a custom first prompt (intern dispatch). */
-  async launchInternTab(promptTemplate: string): Promise<void> {
-    await launchNewTab(this.store, this.runtime, undefined, promptTemplate);
+  /** Launch a tab-mode research-intern agent (dispatch intern). */
+  async launchInternTab(): Promise<void> {
+    await launchNewTab(this.store, this.runtime, undefined, INTERN_RESEARCH_PROMPT);
   }
 
   exportDefaultLayout(): void {
